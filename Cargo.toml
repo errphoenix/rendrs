@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arrayvec = "0.7.8"
 ethel = { path = "../ethel" }
 janus = { path = "../janus", default-features = false, features = ["expose_gl", "textures"] }
+thiserror = "2.0.18"
