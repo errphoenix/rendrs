@@ -1,4 +1,3 @@
-use arrayvec::ArrayVec;
 use janus::{GpuResource, texture::TextureView};
 
 pub const MAX_ATTACHMENTS: usize = 8;
@@ -33,11 +32,16 @@ impl From<&Framebuffer> for FramebufferId {
     }
 }
 
+type ColorAttachments = tinyvec::ArrayVec<[TextureView; MAX_ATTACHMENTS]>;
+type DepthAttachment = Option<TextureView>;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FramebufferView {
     pub id: FramebufferId,
     pub width: u32,
     pub height: u32,
+    color_attachments: ColorAttachments,
+    depth_attachment: DepthAttachment,
 }
 impl From<&Framebuffer> for FramebufferView {
     fn from(value: &Framebuffer) -> Self {
@@ -50,6 +54,8 @@ impl FramebufferView {
             id: framebuffer.id,
             width: framebuffer.width,
             height: framebuffer.height,
+            color_attachments: framebuffer.color_attachments,
+            depth_attachment: framebuffer.depth_attachment,
         }
     }
 
@@ -95,8 +101,8 @@ pub struct Framebuffer {
     pub id: FramebufferId,
     pub width: u32,
     pub height: u32,
-    color_attachments: ArrayVec<TextureView, MAX_ATTACHMENTS>,
-    depth_attachment: Option<TextureView>,
+    color_attachments: ColorAttachments,
+    depth_attachment: DepthAttachment,
 }
 impl Framebuffer {
     pub fn new(
@@ -201,6 +207,14 @@ impl Framebuffer {
 
     pub const fn height(&self) -> u32 {
         self.height
+    }
+
+    pub fn color_attachment(&self, index: usize) -> TextureView {
+        self.color_attachments[index]
+    }
+
+    pub fn depth_attachment(&self) -> Option<TextureView> {
+        self.depth_attachment
     }
 
     pub const fn as_view(&self) -> FramebufferView {
