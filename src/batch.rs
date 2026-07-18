@@ -35,11 +35,7 @@ impl<T: Clone + Copy> BatchManager<T> {
     /// This operation is O(n) depending on the number of batches in the list:
     /// usually the number of batches is not very high, especially if you are
     /// making use of texture atlases, so the overhead is negligible.
-    pub fn insert(
-        &mut self,
-        element: T,
-        texture: TextureKey,
-    ) -> Option<(BatchGroupIndex, BatchUnitIndex)> {
+    pub fn insert(&mut self, element: T, texture: TextureKey) -> (BatchGroupIndex, BatchUnitIndex) {
         for (i, batch) in self
             .batches
             .iter_mut()
@@ -47,7 +43,7 @@ impl<T: Clone + Copy> BatchManager<T> {
             .filter(|(_, batch)| !batch.is_exhausted())
         {
             if let Some(tui) = batch.insert(element, texture) {
-                return Some((BatchGroupIndex(i), tui));
+                return (BatchGroupIndex(i), tui);
             }
         }
 
@@ -62,7 +58,7 @@ impl<T: Clone + Copy> BatchManager<T> {
         };
         self.batches.push(new_batch);
 
-        Some((BatchGroupIndex(new_batch_index), tui))
+        (BatchGroupIndex(new_batch_index), tui)
     }
 
     pub fn batches(&self) -> &[Batch<T>] {
