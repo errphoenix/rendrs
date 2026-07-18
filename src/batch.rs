@@ -1,5 +1,99 @@
 use janus::texture::{TextureKey, TextureTarget};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct BatchGroupIndex(usize);
+
+/// A dynamic persistent collection of [`batches`](Batch).
+#[derive(Debug, Clone, Default)]
+pub struct BatchManager<T: Clone + Copy> {
+    batches: Vec<Batch<T>>,
+}
+impl<T: Clone + Copy> BatchManager<T> {
+    pub fn new() -> Self {
+        Self {
+            batches: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            batches: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Insert a new `element` attached to a `texture`.
+    ///
+    /// This function will attempt to find an existing [`Batch`] to append the
+    /// `element` to, returning its [`batch group index`](BatchGroupIndx) and
+    /// its [`unit texture index`](BatchUnitIndex) in that batch.
+    ///
+    /// If one is not found, a new [`Batch`] is created and appended at the end
+    /// of the batches list.
+    /// This might trigger an allocation if the batches list needs to expand
+    /// its capacity.
+    ///
+    /// This operation is O(n) depending on the number of batches in the list:
+    /// usually the number of batches is not very high, especially if you are
+    /// making use of texture atlases, so the overhead is negligible.
+    pub fn insert(
+        &mut self,
+        element: T,
+        texture: TextureKey,
+    ) -> Option<(BatchGroupIndex, BatchUnitIndex)> {
+        for (i, batch) in self
+            .batches
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, batch)| !batch.is_exhausted())
+        {
+            if let Some(tui) = batch.insert(element, texture) {
+                return Some((BatchGroupIndex(i), tui));
+            }
+        }
+
+        const BASE_CAPACITY: usize = 1024;
+        let new_batch_index = self.len();
+        let (new_batch, tui) = {
+            let mut batch = Batch::with_array_capacity(BASE_CAPACITY);
+            let tui = batch
+                .insert(element, texture)
+                .expect("new batch must have attachment texture group available");
+            (batch, tui)
+        };
+        self.batches.push(new_batch);
+
+        Some((BatchGroupIndex(new_batch_index), tui))
+    }
+
+    pub fn batches(&self) -> &[Batch<T>] {
+        &self.batches
+    }
+
+    pub fn batches_mut(&mut self) -> &mut [Batch<T>] {
+        &mut self.batches
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Batch<T>> {
+        self.batches.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Batch<T>> {
+        self.batches.get_mut(index)
+    }
+
+    pub fn len(&self) -> usize {
+        self.batches.len()
+    }
+
+    /// Clear all batching data.
+    ///
+    /// Does not de-allocate any memory, allowing the memory to be reused and
+    /// avoid allocations down the line.
+    pub fn clear(&mut self) {
+        self.batches.iter_mut().for_each(Batch::clear);
+    }
+}
+
 pub const PER_BATCH_UNITS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -27,8 +121,16 @@ impl<T: Clone + Copy> Batch<T> {
         }
     }
 
+    pub fn with_array_capacity(capacity: usize) -> Self {
+        Self {
+            array: Vec::with_capacity(capacity),
+            units: [None; PER_BATCH_UNITS],
+            head: 0,
+        }
+    }
+
     /// Binds all units' textures as 2D textures.
-    pub fn bind_textures(&self) {
+    pub fn bind_unit_textures(&self) {
         for (i, &texture) in self.units.iter().enumerate() {
             let texture = texture.unwrap_or_default();
             let unit = i as u32;
@@ -46,17 +148,16 @@ impl<T: Clone + Copy> Batch<T> {
 
     /// Attempt to insert an `element` attached to the unit bound to `texture`.
     ///
-    /// Will return `true` if the operation is successful, otherwise `false`.
+    /// Will return `None` if the operation was not successful, otherwise the
+    /// [`unit texture index`](BatchUnitIndex) is returned.
     ///
     /// If the operation is not successful, you should attempt to insert
     /// the element in another batch.
-    pub fn insert(&mut self, element: T, texture: TextureKey) -> bool {
-        if self.fetch_location_or_create(texture).is_some() {
+    pub fn insert(&mut self, element: T, texture: TextureKey) -> Option<BatchUnitIndex> {
+        self.fetch_location_or_create(texture).and_then(|bui| {
             self.array.push(element);
-            true
-        } else {
-            false
-        }
+            Some(bui)
+        })
     }
 
     /// Look up location associated to `texture`, or attach to a new unit if
