@@ -103,12 +103,14 @@ pub struct BatchUnitIndex(usize);
 ///
 /// This allows up to `N` draw-calls to be submitted concurrently.
 #[derive(Debug, Default, Clone)]
-pub struct Batch<T: Clone + Copy> {
+pub struct Batch<T> {
     array: Vec<T>,
     units: [Option<TextureKey>; PER_BATCH_UNITS],
     head: usize,
 }
 impl<T: Clone + Copy> Batch<T> {
+    pub const UNITS: usize = PER_BATCH_UNITS;
+
     pub fn new() -> Self {
         Self {
             array: Vec::new(),
@@ -163,12 +165,16 @@ impl<T: Clone + Copy> Batch<T> {
     pub fn fetch_location_or_create(&mut self, texture: TextureKey) -> Option<BatchUnitIndex> {
         let existing = self.fetch_location(texture);
         if let Some(existing) = existing {
+            // exists
             Some(existing)
         } else if !self.is_exhausted() {
-            let location = BatchUnitIndex(self.units.len());
+            // create new and advance head
+            let location = BatchUnitIndex(self.head);
             self.units[self.head] = Some(texture);
+            self.head += 1;
             Some(location)
         } else {
+            // batch exhausted and no matching tex group
             None
         }
     }
