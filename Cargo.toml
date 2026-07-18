@@ -8,3 +8,8 @@ ethel = { path = "../ethel" }
 janus = { path = "../janus", default-features = false, features = ["expose_gl", "textures"] }
 thiserror = "2.0.18"
 tinyvec = "1.12.0"
+
+[features]
+default = ["framebuffer", "batching"]
+framebuffer = []
+batching = []
