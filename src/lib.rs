@@ -3,12 +3,10 @@ use ethel::{
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::texture::{
-    ImageFormat, ImageType, Texture, TextureFiltering, TextureKey, TextureTarget, TextureView,
+    ImageFormat, ImageType, Texture, TextureFiltering, TextureTarget, TextureView,
 };
 
-use crate::framebuffer::{
-    Framebuffer, FramebufferError, FramebufferResult, FramebufferView, HasFramebuffer,
-};
+use crate::framebuffer::{Framebuffer, FramebufferError, FramebufferView, HasFramebuffer};
 
 #[cfg(feature = "batching")]
 pub mod batch;
@@ -70,6 +68,7 @@ impl RenderTargetDescriptor {
     }
 }
 
+/// Resolution dependant render output buffer.
 #[derive(Debug)]
 pub struct RenderTarget {
     label: &'static str,
@@ -143,6 +142,7 @@ impl RenderTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RenderTargetId(u32);
 
+/// An view into a [`RenderTarget`] from [`RenderPool`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RenderTargetAccessor {
     id: RenderTargetId,
@@ -164,6 +164,7 @@ impl RenderTargetAccessor {
     }
 }
 
+/// A global collection of [`render targets`](RenderTarget).
 #[derive(Debug, Default)]
 pub struct RenderPool {
     targets: Vec<RenderTarget>,
@@ -249,6 +250,7 @@ pub enum ImageAccessKind {
     ReadWrite,
 }
 
+/// An uniform sampler object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SamplerObject(TextureView);
 impl SamplerObject {
@@ -390,6 +392,7 @@ impl<const S: usize, const O: usize> DrawPassResources<S, O> {
         let framebuffer = Framebuffer::new(fb_size.0 as u32, fb_size.1 as u32, &colors, depth)?;
         framebuffer.set_default_buffers_state();
         self.framebuffer = Some(framebuffer);
+        self.valid = true;
         Ok(())
     }
 
@@ -409,6 +412,18 @@ impl<const S: usize, const O: usize> DrawPassResources<S, O> {
         &self.samplers[index]
     }
 
+    pub fn outputs(&self) -> &[OutputObject; O] {
+        &self.outputs
+    }
+
+    pub fn output(&self, index: usize) -> &OutputObject {
+        &self.outputs[index]
+    }
+
+    pub fn output_mut(&mut self, index: usize) -> &mut OutputObject {
+        &mut self.outputs[index]
+    }
+
     /// Returns `None` if the framebuffer is not initialized.
     ///
     /// The framebuffer is always initialized after the first execution, but
@@ -425,17 +440,19 @@ impl<const S: usize, const O: usize> DrawPassResources<S, O> {
 }
 
 #[derive(Debug)]
-pub struct ComputePassResources<const I: usize> {
+pub struct ComputePass<const I: usize> {
     shader: ComputeShaderHandleView,
     images: [ImageTarget; I],
 }
-impl<const I: usize> PassResources for ComputePassResources<I> {
+impl<const I: usize> Pass for ComputePass<I> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ComputeShaderHandleView {
         self.shader
     }
+
+    fn bind_shader_storage(&self, _frame_index: usize) {}
 }
-impl<const I: usize> ComputePassResources<I> {
+impl<const I: usize> ComputePass<I> {
     pub const fn new(shader: ComputeShaderHandleView, images: [ImageTarget; I]) -> Self {
         Self { shader, images }
     }
