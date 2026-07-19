@@ -316,13 +316,7 @@ pub trait Pass<Ctx> {
         self.shader().bind();
     }
 
-    /// Prepare or bind shader storage buffers.
-    ///
-    /// Also passes this frame's triple buffer index, necessary to bind
-    /// triple-buffered SSBOs provided by Ethel.
-    fn bind_shader_storage(&self, frame_index: StorageSection, ctx: &Ctx);
-
-    fn execute<F: FnMut(StorageSection, &Ctx)>(
+    fn execute<F: Fn(StorageSection, &Ctx)>(
         &mut self,
         frame_index: StorageSection,
         render_pool: &RenderPool,
@@ -345,18 +339,12 @@ impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<S, O> {
         self.shader
     }
 
-    /// The default [`DrawPass`] has no SSBO bindings defined, implement
-    /// a custom [`Pass`].
-    ///
-    /// See [`Pass::bind_shader_storage`].
-    fn bind_shader_storage(&self, _frame_index: StorageSection, _ctx: &Ctx) {}
-
-    fn execute<F: FnMut(StorageSection, &Ctx)>(
+    fn execute<F: Fn(StorageSection, &Ctx)>(
         &mut self,
         frame_index: StorageSection,
         render_pool: &RenderPool,
         ctx: &Ctx,
-        mut submit: F,
+        submit: F,
     ) {
         if !self.is_valid() {
             if let Err(err) = self.revalidate_framebuffer(render_pool) {
@@ -505,33 +493,57 @@ impl<const S: usize, const O: usize> DrawPass<S, O> {
 }
 
 #[derive(Debug)]
-pub struct ComputePass<const I: usize> {
+pub struct ComputePass<const S: usize, const I: usize> {
     shader: ComputeShaderHandleView,
+    samplers: [SamplerObject; S],
     images: [ImageTarget; I],
 }
-impl<Ctx, const I: usize> Pass<Ctx> for ComputePass<I> {
+impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<S, I> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ComputeShaderHandleView {
         self.shader
     }
 
-    fn bind_shader_storage(&self, _frame_index: StorageSection, _ctx: &Ctx) {}
-
-    fn execute<F: FnMut(StorageSection, &Ctx)>(
+    fn execute<F: Fn(StorageSection, &Ctx)>(
         &mut self,
         frame_index: StorageSection,
         render_pool: &RenderPool,
         ctx: &Ctx,
-        mut submit: F,
+        submit: F,
     ) {
         Pass::<Ctx>::bind_shader(self);
+        self.bind_samplers();
         self.bind_images(render_pool);
         submit(frame_index, ctx);
     }
 }
-impl<const I: usize> ComputePass<I> {
-    pub const fn new(shader: ComputeShaderHandleView, images: [ImageTarget; I]) -> Self {
-        Self { shader, images }
+impl<const S: usize, const I: usize> ComputePass<S, I> {
+    pub const fn new(
+        shader: ComputeShaderHandleView,
+        samplers: [SamplerObject; S],
+        images: [ImageTarget; I],
+    ) -> Self {
+        Self {
+            shader,
+            samplers,
+            images,
+        }
+    }
+
+    pub fn bind_samplers(&self) {
+        self.samplers.iter().enumerate().for_each(|(i, sampler)| {
+            let unit = i as u32;
+            let texture = sampler.texture();
+            janus::texture::bind(TextureTarget::Flat, texture, unit);
+        });
+    }
+
+    pub const fn samplers(&self) -> &[SamplerObject; S] {
+        &self.samplers
+    }
+
+    pub fn sampler(&self, index: usize) -> &SamplerObject {
+        &self.samplers[index]
     }
 
     pub fn bind_images(&mut self, _render_pool: &RenderPool) {
