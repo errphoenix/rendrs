@@ -1,5 +1,12 @@
-use ethel::shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram};
-use janus::texture::{TextureTarget, TextureView};
+use ethel::{
+    render::Resolution,
+    shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
+};
+use janus::texture::{
+    ImageFormat, ImageType, Texture, TextureFiltering, TextureKey, TextureTarget, TextureView,
+};
+
+use crate::framebuffer::{Framebuffer, FramebufferView};
 
 #[cfg(feature = "batching")]
 pub mod batch;
@@ -12,68 +19,123 @@ pub const BATCH_UNITS: usize = batch::PER_BATCH_UNITS;
 pub const PASS_READ_UNITS: usize = 16;
 pub const PASS_WRITE_UNITS: usize = framebuffer::MAX_ATTACHMENTS;
 
-pub struct PipelineBuilder<const PASSES: usize> {}
-impl<const PASSES: usize> PipelineBuilder<PASSES> {}
-
-// pub struct Pipeline<const PASSES: usize> {
-//     passes: [Pass; PASSES],
-// }
-
-/// A uniform sampler texture.
-///
-/// Not to be confused with a framebuffer read target.
-#[derive(Debug)]
-pub struct ReadTarget {
-    label: &'static str,
-    texture: TextureView,
+#[derive(Clone, Copy, Debug)]
+pub struct RenderTargetDescriptor {
+    format: ImageFormat,
+    pixel_type: ImageType,
+    filtering: TextureFiltering,
+    resolution_relative_scale: f32,
 }
-impl ReadTarget {
-    pub const fn new(label: &'static str, texture: TextureView) -> Self {
-        Self { label, texture }
-    }
-
-    pub const fn label(&self) -> &'static str {
-        self.label
-    }
-
-    pub const fn texture(&self) -> &TextureView {
-        &self.texture
-    }
-}
-
-/// An output framebuffer target used in draw passes.
-#[derive(Debug)]
-pub struct DrawWriteTarget {
-    label: &'static str,
-    kind: DrawWriteTargetKind,
-    texture: TextureView,
-}
-impl DrawWriteTarget {
-    pub const fn new(label: &'static str, kind: DrawWriteTargetKind, texture: TextureView) -> Self {
+impl Default for RenderTargetDescriptor {
+    fn default() -> Self {
         Self {
-            label,
-            kind,
-            texture,
+            format: ImageFormat::Rgb,
+            pixel_type: ImageType::Bits8,
+            filtering: TextureFiltering::Linear,
+            resolution_relative_scale: 1.0, // full resolution
+        }
+    }
+}
+impl RenderTargetDescriptor {
+    pub const fn new(
+        format: ImageFormat,
+        pixel_type: ImageType,
+        filtering: TextureFiltering,
+        resolution_relative_scale: f32,
+    ) -> Self {
+        Self {
+            format,
+            pixel_type,
+            filtering,
+            resolution_relative_scale,
         }
     }
 
-    pub const fn label(&self) -> &'static str {
-        self.label
+    pub const fn format(&self) -> ImageFormat {
+        self.format
     }
 
-    pub const fn kind(&self) -> DrawWriteTargetKind {
-        self.kind
+    pub const fn pixel_type(&self) -> ImageType {
+        self.pixel_type
     }
 
-    pub const fn texture(&self) -> &TextureView {
-        &self.texture
+    pub const fn filtering(&self) -> TextureFiltering {
+        self.filtering
+    }
+
+    pub const fn resolution_relative_scale(&self) -> f32 {
+        self.resolution_relative_scale
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DrawWriteTargetKind {
-    Color,
-    Depth,
+#[derive(Debug)]
+pub struct RenderTarget {
+    label: &'static str,
+    descriptor: RenderTargetDescriptor,
+    texture: Texture,
+    cached_resolution: (u32, u32),
+}
+impl RenderTarget {
+    pub fn new(
+        label: &'static str,
+        descriptor: RenderTargetDescriptor,
+        resolution: Resolution,
+    ) -> Self {
+        janus::debug_assert_gl!();
+
+        let resolution = Self::scale_resolution(descriptor.resolution_relative_scale, resolution);
+        let texture = Texture::empty(
+            resolution.0 as i32,
+            resolution.1 as i32,
+            descriptor.pixel_type,
+            descriptor.format,
+        );
+
+        Self {
+            label,
+            descriptor,
+            texture,
+            cached_resolution: resolution,
+        }
+    }
+
+    pub fn resize(&mut self, new_resolution: Resolution) {
+        let scaled_resolution =
+            Self::scale_resolution(self.descriptor.resolution_relative_scale, new_resolution);
+
+        if scaled_resolution != self.cached_resolution {
+            self.cached_resolution = scaled_resolution;
+            self.texture = Texture::empty(
+                scaled_resolution.0 as i32,
+                scaled_resolution.1 as i32,
+                self.descriptor.pixel_type,
+                self.descriptor.format,
+            );
+        }
+    }
+
+    fn scale_resolution(scale: f32, resolution: Resolution) -> (u32, u32) {
+        (
+            ((resolution.width * scale).round() as u32).max(1),
+            ((resolution.height * scale).round() as u32).max(1),
+        )
+    }
+
+    pub fn view(&self) -> TextureView {
+        self.texture.view()
+    }
+
+    pub fn cached_resolution(&self) -> (u32, u32) {
+        self.cached_resolution
+    }
+
+    pub fn label(&self) -> &'static str {
+        self.label
+    }
+
+    pub fn descriptor(&self) -> RenderTargetDescriptor {
+        self.descriptor
+    }
 }
 
 /// An uniform image used in compute passes.
