@@ -1,5 +1,5 @@
 use ethel::{
-    render::Resolution,
+    render::{Resolution, buffer::StorageSection},
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::texture::{
@@ -194,6 +194,16 @@ impl RenderPool {
         (Self { targets }, ids)
     }
 
+    /// Revalidate all targets with a new `resolution`.
+    ///
+    /// Each target will only be revalidated if the resolution has
+    /// effectively changed from last time.
+    pub fn revalidate_targets(&mut self, resolution: Resolution) {
+        self.targets
+            .iter_mut()
+            .for_each(|target| target.resize(resolution));
+    }
+
     pub fn add(&mut self, target: RenderTarget) -> RenderTargetId {
         let id = RenderTargetId(self.targets.len() as u32);
         self.targets.push(target);
@@ -214,6 +224,8 @@ impl RenderPool {
     }
 }
 
+/// todo: refactor like [`OutputObject`]
+///
 /// An uniform image used in compute passes.
 #[derive(Debug)]
 pub struct ImageTarget {
@@ -297,29 +309,69 @@ impl OutputObject {
     }
 }
 
-pub trait PassResources {
+pub trait Pass<Ctx> {
     fn shader(&self) -> impl ShaderProgram;
 
     fn bind_shader(&self) {
         self.shader().bind();
     }
+
+    /// Prepare or bind shader storage buffers.
+    ///
+    /// Also passes this frame's triple buffer index, necessary to bind
+    /// triple-buffered SSBOs provided by Ethel.
+    fn bind_shader_storage(&self, frame_index: StorageSection, ctx: &Ctx);
+
+    fn execute<F: FnMut(StorageSection, &Ctx)>(
+        &mut self,
+        frame_index: StorageSection,
+        render_pool: &RenderPool,
+        ctx: &Ctx,
+        submit: F,
+    );
 }
 
 #[derive(Debug)]
-pub struct DrawPassResources<const S: usize, const O: usize> {
+pub struct DrawPass<const S: usize, const O: usize> {
     shader: ShaderHandleView,
     samplers: [SamplerObject; S],
     outputs: [OutputObject; O],
     framebuffer: Option<Framebuffer>,
     valid: bool,
 }
-impl<const S: usize, const O: usize> PassResources for DrawPassResources<S, O> {
+impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<S, O> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ShaderHandleView {
         self.shader
     }
+
+    /// The default [`DrawPass`] has no SSBO bindings defined, implement
+    /// a custom [`Pass`].
+    ///
+    /// See [`Pass::bind_shader_storage`].
+    fn bind_shader_storage(&self, _frame_index: StorageSection, _ctx: &Ctx) {}
+
+    fn execute<F: FnMut(StorageSection, &Ctx)>(
+        &mut self,
+        frame_index: StorageSection,
+        render_pool: &RenderPool,
+        ctx: &Ctx,
+        mut submit: F,
+    ) {
+        if !self.is_valid() {
+            if let Err(err) = self.revalidate_framebuffer(render_pool) {
+                tracing::error!("failed to revalidate framebuffer: {err}");
+            }
+        }
+
+        Pass::<Ctx>::bind_shader(self);
+        self.bind_samplers();
+        self.bind_framebuffer();
+
+        submit(frame_index, ctx);
+    }
 }
-impl<const S: usize, const O: usize> DrawPassResources<S, O> {
+impl<const S: usize, const O: usize> DrawPass<S, O> {
     /// Initialize resource descriptions for a draw-pass.
     ///
     /// This does not yet create a full `Framebuffer`: it will be initialized
@@ -348,7 +400,14 @@ impl<const S: usize, const O: usize> DrawPassResources<S, O> {
         self.valid = false;
     }
 
-    fn rebuild_framebuffer(&mut self, render_pool: &RenderPool) -> Result<(), FramebufferError> {
+    pub fn is_valid(&self) -> bool {
+        self.valid
+    }
+
+    pub fn revalidate_framebuffer(
+        &mut self,
+        render_pool: &RenderPool,
+    ) -> Result<(), FramebufferError> {
         self.outputs
             .iter_mut()
             .for_each(|output| output.revalidate(render_pool));
@@ -394,6 +453,12 @@ impl<const S: usize, const O: usize> DrawPassResources<S, O> {
         self.framebuffer = Some(framebuffer);
         self.valid = true;
         Ok(())
+    }
+
+    pub fn bind_framebuffer(&self) {
+        if let Some(fb) = &self.framebuffer {
+            fb.bind();
+        }
     }
 
     pub fn bind_samplers(&self) {
@@ -444,17 +509,37 @@ pub struct ComputePass<const I: usize> {
     shader: ComputeShaderHandleView,
     images: [ImageTarget; I],
 }
-impl<const I: usize> Pass for ComputePass<I> {
+impl<Ctx, const I: usize> Pass<Ctx> for ComputePass<I> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ComputeShaderHandleView {
         self.shader
     }
 
-    fn bind_shader_storage(&self, _frame_index: usize) {}
+    fn bind_shader_storage(&self, _frame_index: StorageSection, _ctx: &Ctx) {}
+
+    fn execute<F: FnMut(StorageSection, &Ctx)>(
+        &mut self,
+        frame_index: StorageSection,
+        render_pool: &RenderPool,
+        ctx: &Ctx,
+        mut submit: F,
+    ) {
+        Pass::<Ctx>::bind_shader(self);
+        self.bind_images(render_pool);
+        submit(frame_index, ctx);
+    }
 }
 impl<const I: usize> ComputePass<I> {
     pub const fn new(shader: ComputeShaderHandleView, images: [ImageTarget; I]) -> Self {
         Self { shader, images }
+    }
+
+    pub fn bind_images(&mut self, _render_pool: &RenderPool) {
+        todo!()
+    }
+
+    pub fn image_target(&self, index: usize) -> &ImageTarget {
+        &self.images[index]
     }
 
     pub const fn image_targets(&self) -> &[ImageTarget; I] {

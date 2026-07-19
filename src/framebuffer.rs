@@ -216,7 +216,7 @@ impl HasFramebuffer for FramebufferView {
 
 #[derive(Debug, thiserror::Error)]
 pub enum FramebufferError {
-    #[error("default framebuffer was specified but it not yet defined")]
+    #[error("default framebuffer was specified but it is not yet defined")]
     Undefined,
     #[error("an attachment point of the framebuffer is incomplete")]
     IncompleteAttachment,
