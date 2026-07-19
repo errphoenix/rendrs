@@ -298,7 +298,33 @@ impl OutputObject {
     }
 }
 
-pub trait Pass<Ctx> {
+pub trait CtxType {
+    type Ctx<'ctx>;
+}
+
+#[macro_export]
+macro_rules! context_wrapper {
+    (for<$lt:lifetime> $context:ident) => {
+        paste::paste! {
+            #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
+            pub struct [< $context Wrapper >];
+            impl $crate::pipeline::CtxType for [< $context Wrapper >] {
+                type Ctx<$lt> = $context<$lt>;
+            }
+        }
+    };
+    ($context:ident) => {
+        paste::paste! {
+            #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
+            pub struct [< $context Wrapper >];
+            impl $crate::pipeline::CtxType for [< $context Wrapper >] {
+                type Ctx<'ctx> = $context;
+            }
+        }
+    };
+}
+
+pub trait Pass<K: CtxType> {
     fn shader(&self) -> impl ShaderProgram;
 
     fn bind_shader(&self) {
@@ -307,18 +333,18 @@ pub trait Pass<Ctx> {
 
     fn revalidate(&mut self, render_pool: &RenderPool);
 
-    fn execute(&self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx);
+    fn execute(&self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &K::Ctx<'_>);
 }
 
 #[derive(Debug)]
-pub struct DrawPass<Ctx, const S: usize, const O: usize> {
+pub struct DrawPass<K: CtxType, const S: usize, const O: usize> {
     shader: ShaderHandleView,
     samplers: [SamplerObject; S],
     outputs: [OutputObject; O],
-    dispatch: fn(StorageSection, &Ctx),
+    dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>),
     framebuffer: Option<Framebuffer>,
 }
-impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<Ctx, S, O> {
+impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ShaderHandleView {
         self.shader
@@ -330,14 +356,14 @@ impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<Ctx, S, O> {
         }
     }
 
-    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &Ctx) {
+    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &K::Ctx<'_>) {
         self.bind_shader();
         self.bind_samplers();
         self.bind_framebuffer();
         (self.dispatch)(frame_index, ctx);
     }
 }
-impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
+impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
     /// Initialize resource descriptions for a draw-pass.
     ///
     /// This does not yet create a full `Framebuffer`: it will be initialized
@@ -349,7 +375,7 @@ impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
         shader: ShaderHandleView,
         samplers: [SamplerObject; S],
         outputs: [OutputObject; O],
-        dispatch: fn(StorageSection, &Ctx),
+        dispatch: fn(StorageSection, &K::Ctx<'_>),
     ) -> Self {
         Self {
             shader,
@@ -455,13 +481,13 @@ impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
 }
 
 #[derive(Debug)]
-pub struct ComputePass<Ctx, const S: usize, const I: usize> {
+pub struct ComputePass<K: CtxType, const S: usize, const I: usize> {
     shader: ComputeShaderHandleView,
     samplers: [SamplerObject; S],
     images: [ImageTarget; I],
-    pre_dispatch: fn(StorageSection, &Ctx) -> [u32; 3],
+    pre_dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>) -> [u32; 3],
 }
-impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<Ctx, S, I> {
+impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ComputeShaderHandleView {
         self.shader
@@ -471,7 +497,7 @@ impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<Ctx, S, I> {
         //todo: revalidate images
     }
 
-    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &Ctx) {
+    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &K::Ctx<'_>) {
         self.bind_shader();
         self.bind_samplers();
         self.bind_images();
@@ -479,12 +505,12 @@ impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<Ctx, S, I> {
         self.shader.dispatch_compute(workgroups);
     }
 }
-impl<Ctx, const S: usize, const I: usize> ComputePass<Ctx, S, I> {
+impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     pub const fn new(
         shader: ComputeShaderHandleView,
         samplers: [SamplerObject; S],
         images: [ImageTarget; I],
-        pre_dispatch: fn(StorageSection, &Ctx) -> [u32; 3],
+        pre_dispatch: fn(StorageSection, &K::Ctx<'_>) -> [u32; 3],
     ) -> Self {
         Self {
             shader,

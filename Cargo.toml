@@ -6,12 +6,13 @@ edition = "2024"
 [dependencies]
 ethel = { path = "../ethel" }
 janus = { path = "../janus", default-features = false, features = ["expose_gl", "textures"] }
+paste = { version = "1.0.15", optional = true }
 thiserror = "2.0.18"
 tinyvec = "1.12.0"
 tracing = "0.1.44"
 
 [features]
 default = ["framebuffer", "batching", "pipeline"]
-pipeline = ["framebuffer"]
+pipeline = ["framebuffer", "dep:paste"]
 framebuffer = []
 batching = []
