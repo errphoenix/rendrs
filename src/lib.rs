@@ -138,6 +138,64 @@ impl RenderTarget {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RenderTargetId(u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RenderTargetAccessor {
+    id: RenderTargetId,
+    texture: TextureView,
+}
+
+#[derive(Debug, Default)]
+pub struct RenderPool {
+    targets: Vec<RenderTarget>,
+}
+impl RenderPool {
+    pub fn new() -> Self {
+        Self {
+            targets: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            targets: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn with_targets<const N: usize>(targets: [RenderTarget; N]) -> (Self, [RenderTargetId; N]) {
+        let targets = {
+            let mut vec = Vec::with_capacity(N);
+            for target in targets {
+                vec.push(target);
+            }
+            vec
+        };
+        let ids = std::array::from_fn(|i| RenderTargetId(i as u32));
+        (Self { targets }, ids)
+    }
+
+    pub fn add(&mut self, target: RenderTarget) -> RenderTargetId {
+        let id = RenderTargetId(self.targets.len() as u32);
+        self.targets.push(target);
+        id
+    }
+
+    pub fn get(&self, id: RenderTargetId) -> Option<&RenderTarget> {
+        self.targets.get(id.0 as usize)
+    }
+
+    pub fn get_mut(&mut self, id: RenderTargetId) -> Option<&mut RenderTarget> {
+        self.targets.get_mut(id.0 as usize)
+    }
+
+    pub fn accessor(&self, id: RenderTargetId) -> Option<RenderTargetAccessor> {
+        let texture = self.get(id)?.view();
+        Some(RenderTargetAccessor { id, texture })
+    }
+}
+
 /// An uniform image used in compute passes.
 #[derive(Debug)]
 pub struct ImageTarget {
@@ -172,6 +230,48 @@ pub enum ImageAccessKind {
     ReadOnly,
     WriteOnly,
     ReadWrite,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SamplerObject(TextureView);
+impl SamplerObject {
+    pub fn new(texture: impl Into<TextureView>) -> Self {
+        Self(texture.into())
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OutputObject {
+    Color(RenderTargetAccessor),
+    Depth(RenderTargetAccessor),
+}
+impl OutputObject {
+    pub fn color(target: RenderTargetAccessor) -> Self {
+        Self::Color(target)
+    }
+
+    pub fn depth(target: RenderTargetAccessor) -> Self {
+        Self::Depth(target)
+    }
+
+    pub const fn accessor(&self) -> RenderTargetAccessor {
+        match self {
+            OutputObject::Color(render_target_accessor) => *render_target_accessor,
+            OutputObject::Depth(render_target_accessor) => *render_target_accessor,
+        }
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        self.accessor().texture
+    }
+
+    pub const fn target_id(&self) -> RenderTargetId {
+        self.accessor().id
+    }
 }
 
 pub trait PassResources {
