@@ -99,11 +99,6 @@ pub trait HasFramebuffer {
     fn set_read_buffer(&self, attachment_index: Option<u32>) {
         janus::debug_assert_gl!();
 
-        #[cfg(debug_assertions)]
-        if let Some(index) = attachment_index {
-            debug_assert!((index as usize) < self.color_attachments_len());
-        }
-
         let index = attachment_index.map_or(janus::gl::NONE, |i| janus::gl::COLOR_ATTACHMENT0 + i);
         unsafe {
             janus::gl::NamedFramebufferReadBuffer(self.id().0, index);

@@ -305,7 +305,9 @@ pub trait Pass<Ctx> {
         self.shader().bind();
     }
 
-    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx);
+    fn revalidate(&mut self, render_pool: &RenderPool);
+
+    fn execute(&self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx);
 }
 
 #[derive(Debug)]
@@ -315,7 +317,6 @@ pub struct DrawPass<Ctx, const S: usize, const O: usize> {
     outputs: [OutputObject; O],
     dispatch: fn(StorageSection, &Ctx),
     framebuffer: Option<Framebuffer>,
-    valid: bool,
 }
 impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<Ctx, S, O> {
     #[allow(refining_impl_trait)]
@@ -323,17 +324,16 @@ impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<Ctx, S, O> {
         self.shader
     }
 
-    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx) {
-        if !self.is_valid() {
-            if let Err(err) = self.revalidate_framebuffer(render_pool) {
-                tracing::error!("failed to revalidate framebuffer: {err}");
-            }
+    fn revalidate(&mut self, render_pool: &RenderPool) {
+        if let Err(err) = self.revalidate_framebuffer(render_pool) {
+            tracing::error!("failed to revalidate framebuffer: {err}");
         }
+    }
 
+    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &Ctx) {
         self.bind_shader();
         self.bind_samplers();
         self.bind_framebuffer();
-
         (self.dispatch)(frame_index, ctx);
     }
 }
@@ -357,19 +357,7 @@ impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
             outputs,
             dispatch,
             framebuffer: None,
-            valid: false,
         }
-    }
-
-    /// Invalidate draw-pass framebuffer (e.g. due to resolution changes).
-    ///
-    /// This will cause a recreation of the framebuffer on the next executon.
-    pub fn invalidate(&mut self) {
-        self.valid = false;
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.valid
     }
 
     pub fn revalidate_framebuffer(
@@ -399,15 +387,10 @@ impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
                         // default/null textures are ignored
                         outputs = [TextureView::default(); O];
                     } else {
-                        if depth_i == O {
-                            // its last, just set to default and go on
-                            outputs[depth_i] = TextureView::default();
-                        } else {
-                            // shift elements after depth to the left to preserve
-                            // color outputs order, then set depth to null
-                            outputs[depth_i..].rotate_left(1);
-                            outputs[O - 1] = TextureView::default();
-                        }
+                        // shift elements after depth to the left to preserve
+                        // color outputs order, then set depth to null
+                        outputs[depth_i..].rotate_left(1);
+                        outputs[O - 1] = TextureView::default();
                     }
                 }
             }
@@ -419,7 +402,6 @@ impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
         let framebuffer = Framebuffer::new(fb_size.0 as u32, fb_size.1 as u32, &colors, depth)?;
         framebuffer.set_default_buffers_state();
         self.framebuffer = Some(framebuffer);
-        self.valid = true;
         Ok(())
     }
 
@@ -485,10 +467,14 @@ impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<Ctx, S, I> {
         self.shader
     }
 
-    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx) {
+    fn revalidate(&mut self, _render_pool: &RenderPool) {
+        //todo: revalidate images
+    }
+
+    fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &Ctx) {
         self.bind_shader();
         self.bind_samplers();
-        self.bind_images(render_pool);
+        self.bind_images();
         let workgroups = (self.pre_dispatch)(frame_index, ctx);
         self.shader.dispatch_compute(workgroups);
     }
@@ -524,8 +510,8 @@ impl<Ctx, const S: usize, const I: usize> ComputePass<Ctx, S, I> {
         &self.samplers[index]
     }
 
-    pub fn bind_images(&mut self, _render_pool: &RenderPool) {
-        todo!()
+    pub fn bind_images(&self) {
+        //todo
     }
 
     pub fn image_target(&self, index: usize) -> &ImageTarget {
