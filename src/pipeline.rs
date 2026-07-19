@@ -305,50 +305,39 @@ pub trait Pass<Ctx> {
         self.shader().bind();
     }
 
-    fn execute<F: Fn(StorageSection, &Ctx)>(
-        &mut self,
-        frame_index: StorageSection,
-        render_pool: &RenderPool,
-        ctx: &Ctx,
-        submit: F,
-    );
+    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx);
 }
 
 #[derive(Debug)]
-pub struct DrawPass<const S: usize, const O: usize> {
+pub struct DrawPass<Ctx, const S: usize, const O: usize> {
     shader: ShaderHandleView,
     samplers: [SamplerObject; S],
     outputs: [OutputObject; O],
+    dispatch: fn(StorageSection, &Ctx),
     framebuffer: Option<Framebuffer>,
     valid: bool,
 }
-impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<S, O> {
+impl<Ctx, const S: usize, const O: usize> Pass<Ctx> for DrawPass<Ctx, S, O> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ShaderHandleView {
         self.shader
     }
 
-    fn execute<F: Fn(StorageSection, &Ctx)>(
-        &mut self,
-        frame_index: StorageSection,
-        render_pool: &RenderPool,
-        ctx: &Ctx,
-        submit: F,
-    ) {
+    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx) {
         if !self.is_valid() {
             if let Err(err) = self.revalidate_framebuffer(render_pool) {
                 tracing::error!("failed to revalidate framebuffer: {err}");
             }
         }
 
-        Pass::<Ctx>::bind_shader(self);
+        self.bind_shader();
         self.bind_samplers();
         self.bind_framebuffer();
 
-        submit(frame_index, ctx);
+        (self.dispatch)(frame_index, ctx);
     }
 }
-impl<const S: usize, const O: usize> DrawPass<S, O> {
+impl<Ctx, const S: usize, const O: usize> DrawPass<Ctx, S, O> {
     /// Initialize resource descriptions for a draw-pass.
     ///
     /// This does not yet create a full `Framebuffer`: it will be initialized
@@ -360,11 +349,13 @@ impl<const S: usize, const O: usize> DrawPass<S, O> {
         shader: ShaderHandleView,
         samplers: [SamplerObject; S],
         outputs: [OutputObject; O],
+        dispatch: fn(StorageSection, &Ctx),
     ) -> Self {
         Self {
             shader,
             samplers,
             outputs,
+            dispatch,
             framebuffer: None,
             valid: false,
         }
@@ -482,40 +473,38 @@ impl<const S: usize, const O: usize> DrawPass<S, O> {
 }
 
 #[derive(Debug)]
-pub struct ComputePass<const S: usize, const I: usize> {
+pub struct ComputePass<Ctx, const S: usize, const I: usize> {
     shader: ComputeShaderHandleView,
     samplers: [SamplerObject; S],
     images: [ImageTarget; I],
+    pre_dispatch: fn(StorageSection, &Ctx) -> [u32; 3],
 }
-impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<S, I> {
+impl<Ctx, const S: usize, const I: usize> Pass<Ctx> for ComputePass<Ctx, S, I> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ComputeShaderHandleView {
         self.shader
     }
 
-    fn execute<F: Fn(StorageSection, &Ctx)>(
-        &mut self,
-        frame_index: StorageSection,
-        render_pool: &RenderPool,
-        ctx: &Ctx,
-        submit: F,
-    ) {
-        Pass::<Ctx>::bind_shader(self);
+    fn execute(&mut self, frame_index: StorageSection, render_pool: &RenderPool, ctx: &Ctx) {
+        self.bind_shader();
         self.bind_samplers();
         self.bind_images(render_pool);
-        submit(frame_index, ctx);
+        let workgroups = (self.pre_dispatch)(frame_index, ctx);
+        self.shader.dispatch_compute(workgroups);
     }
 }
-impl<const S: usize, const I: usize> ComputePass<S, I> {
+impl<Ctx, const S: usize, const I: usize> ComputePass<Ctx, S, I> {
     pub const fn new(
         shader: ComputeShaderHandleView,
         samplers: [SamplerObject; S],
         images: [ImageTarget; I],
+        pre_dispatch: fn(StorageSection, &Ctx) -> [u32; 3],
     ) -> Self {
         Self {
             shader,
             samplers,
             images,
+            pre_dispatch,
         }
     }
 
