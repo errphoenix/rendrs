@@ -321,7 +321,12 @@ impl Framebuffer {
         }
         // status all ok !!
 
-        let color_attachments = color_attachments.iter().copied().collect();
+        let color_attachments = color_attachments
+            .iter()
+            .copied()
+            .filter(|tv| !tv.is_null())
+            .collect();
+
         Ok(Self {
             id: FramebufferId(id),
             width,

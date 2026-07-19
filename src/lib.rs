@@ -6,7 +6,9 @@ use janus::texture::{
     ImageFormat, ImageType, Texture, TextureFiltering, TextureKey, TextureTarget, TextureView,
 };
 
-use crate::framebuffer::{Framebuffer, FramebufferView};
+use crate::framebuffer::{
+    Framebuffer, FramebufferError, FramebufferResult, FramebufferView, HasFramebuffer,
+};
 
 #[cfg(feature = "batching")]
 pub mod batch;
@@ -146,6 +148,21 @@ pub struct RenderTargetAccessor {
     id: RenderTargetId,
     texture: TextureView,
 }
+impl RenderTargetAccessor {
+    pub const fn id(&self) -> RenderTargetId {
+        self.id
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        self.texture
+    }
+
+    pub fn revalidate(&mut self, render_pool: &RenderPool) {
+        *self = render_pool
+            .accessor(self.id())
+            .expect("accessor's render target must exist in pool");
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct RenderPool {
@@ -265,6 +282,10 @@ impl OutputObject {
         }
     }
 
+    pub fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.accessor().revalidate(render_pool);
+    }
+
     pub const fn texture(&self) -> TextureView {
         self.accessor().texture
     }
@@ -283,43 +304,123 @@ pub trait PassResources {
 }
 
 #[derive(Debug)]
-pub struct DrawPassResources<const R: usize, const W: usize> {
+pub struct DrawPassResources<const S: usize, const O: usize> {
     shader: ShaderHandleView,
-    reads: [ReadTarget; R],
-    writes: [DrawWriteTarget; W],
+    samplers: [SamplerObject; S],
+    outputs: [OutputObject; O],
+    framebuffer: Option<Framebuffer>,
+    valid: bool,
 }
-impl<const R: usize, const W: usize> PassResources for DrawPassResources<R, W> {
+impl<const S: usize, const O: usize> PassResources for DrawPassResources<S, O> {
     #[allow(refining_impl_trait)]
     fn shader(&self) -> ShaderHandleView {
         self.shader
     }
 }
-impl<const R: usize, const W: usize> DrawPassResources<R, W> {
+impl<const S: usize, const O: usize> DrawPassResources<S, O> {
+    /// Initialize resource descriptions for a draw-pass.
+    ///
+    /// This does not yet create a full `Framebuffer`: it will be initialized
+    /// lazily when needed, i.e. on the first execution.
+    ///
+    /// The `outputs` described can be multiple [`OutputObject::Color`]
+    /// variants, but up to only one (optional) [`OutputObject::Depth`].
     pub const fn new(
         shader: ShaderHandleView,
-        reads: [ReadTarget; R],
-        writes: [DrawWriteTarget; W],
+        samplers: [SamplerObject; S],
+        outputs: [OutputObject; O],
     ) -> Self {
         Self {
             shader,
-            reads,
-            writes,
+            samplers,
+            outputs,
+            framebuffer: None,
+            valid: false,
         }
     }
 
-    pub fn bind_read_targets(&self) {
-        self.reads.iter().enumerate().for_each(|(i, target)| {
+    /// Invalidate draw-pass framebuffer (e.g. due to resolution changes).
+    ///
+    /// This will cause a recreation of the framebuffer on the next executon.
+    pub fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    fn rebuild_framebuffer(&mut self, render_pool: &RenderPool) -> Result<(), FramebufferError> {
+        self.outputs
+            .iter_mut()
+            .for_each(|output| output.revalidate(render_pool));
+
+        let (colors, fb_size, depth) = {
+            // includes depth and must be explicitly ignored later
+            let mut outputs: [TextureView; O] = std::array::from_fn(|i| self.outputs[i].texture());
+
+            // since all attachments must have the same size, any will do
+            let fb_size = outputs.get(0).map(TextureView::size).unwrap_or((1, 1));
+
+            let depth_i = self
+                .outputs
+                .iter()
+                .position(|output| matches!(output, OutputObject::Depth(_)));
+
+            if O > 0 {
+                if let Some(depth_i) = depth_i {
+                    if O == 1 {
+                        // no color attachments, the only output was depth
+                        // default/null textures are ignored
+                        outputs = [TextureView::default(); O];
+                    } else {
+                        if depth_i == O {
+                            // its last, just set to default and go on
+                            outputs[depth_i] = TextureView::default();
+                        } else {
+                            // shift elements after depth to the left to preserve
+                            // color outputs order, then set depth to null
+                            outputs[depth_i..].rotate_left(1);
+                            outputs[O - 1] = TextureView::default();
+                        }
+                    }
+                }
+            }
+
+            let depth_output = depth_i.map(|i| outputs[i]);
+            (outputs, fb_size, depth_output)
+        };
+
+        let framebuffer = Framebuffer::new(fb_size.0 as u32, fb_size.1 as u32, &colors, depth)?;
+        framebuffer.set_default_buffers_state();
+        self.framebuffer = Some(framebuffer);
+        Ok(())
+    }
+
+    pub fn bind_samplers(&self) {
+        self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
-            janus::texture::bind(TextureTarget::Flat, target.texture, unit);
+            let texture = sampler.texture();
+            janus::texture::bind(TextureTarget::Flat, texture, unit);
         });
     }
 
-    pub const fn read_targets(&self) -> &[ReadTarget; R] {
-        &self.reads
+    pub const fn samplers(&self) -> &[SamplerObject; S] {
+        &self.samplers
     }
 
-    pub const fn write_targets(&self) -> &[DrawWriteTarget; W] {
-        &self.writes
+    pub fn sampler(&self, index: usize) -> &SamplerObject {
+        &self.samplers[index]
+    }
+
+    /// Returns `None` if the framebuffer is not initialized.
+    ///
+    /// The framebuffer is always initialized after the first execution, but
+    /// it may not be valid if it has been invalidated before the next
+    /// execution.
+    pub fn framebuffer(&self) -> Option<&Framebuffer> {
+        self.framebuffer.as_ref()
+    }
+
+    /// See [`Self::framebuffer`].
+    pub fn framebuffer_view(&self) -> Option<FramebufferView> {
+        self.framebuffer.as_ref().map(Framebuffer::as_view)
     }
 }
 
