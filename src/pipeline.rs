@@ -3,7 +3,7 @@ use ethel::{
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::texture::{
-    ImageFormat, ImageType, Tex, Texture, TextureFiltering, TextureKind, TextureView,
+    ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
 };
 
 use crate::framebuffer::{Framebuffer, FramebufferError, FramebufferView, HasFramebuffer};
@@ -13,7 +13,7 @@ pub struct RenderTargetDescriptor {
     format: ImageFormat,
     pixel_type: ImageType,
     filtering: TextureFiltering,
-    hardware_mip_levels: i32,
+    hardware_mip_levels: MipLevels,
     resolution_relative_scale: f32,
 }
 impl Default for RenderTargetDescriptor {
@@ -22,7 +22,7 @@ impl Default for RenderTargetDescriptor {
             format: ImageFormat::Rgb,
             pixel_type: ImageType::Bits8,
             filtering: TextureFiltering::Linear,
-            hardware_mip_levels: 0,         // no mipmapping
+            hardware_mip_levels: MipLevels::default(),
             resolution_relative_scale: 1.0, // full resolution
         }
     }
@@ -32,7 +32,7 @@ impl RenderTargetDescriptor {
         format: ImageFormat,
         pixel_type: ImageType,
         filtering: TextureFiltering,
-        hardware_mip_levels: i32,
+        hardware_mip_levels: MipLevels,
         resolution_relative_scale: f32,
     ) -> Self {
         Self {
@@ -56,7 +56,7 @@ impl RenderTargetDescriptor {
         self.filtering
     }
 
-    pub const fn hardware_mip_levels(&self) -> i32 {
+    pub const fn hardware_mip_levels(&self) -> MipLevels {
         self.hardware_mip_levels
     }
 
