@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use janus::{GpuResource, texture::TextureView};
 
 pub const MAX_ATTACHMENTS: usize = 8;
@@ -37,8 +39,33 @@ impl From<&Framebuffer> for FramebufferId {
     }
 }
 
-type ColorAttachments = tinyvec::ArrayVec<[TextureView; MAX_ATTACHMENTS]>;
-type DepthAttachment = Option<TextureView>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AttachmentTexture(TextureView);
+impl Default for AttachmentTexture {
+    fn default() -> Self {
+        Self(TextureView::null(janus::texture::TextureKind::Dim2D))
+    }
+}
+impl From<TextureView> for AttachmentTexture {
+    fn from(value: TextureView) -> Self {
+        Self(value)
+    }
+}
+impl From<AttachmentTexture> for TextureView {
+    fn from(value: AttachmentTexture) -> Self {
+        value.0
+    }
+}
+impl Deref for AttachmentTexture {
+    type Target = TextureView;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+type ColorAttachments = tinyvec::ArrayVec<[AttachmentTexture; MAX_ATTACHMENTS]>;
+type DepthAttachment = Option<AttachmentTexture>;
 
 pub trait HasFramebuffer {
     fn id(&self) -> FramebufferId;
@@ -59,7 +86,7 @@ pub trait HasFramebuffer {
         self.color_attachments().len()
     }
 
-    fn color_attachment(&self, index: usize) -> TextureView {
+    fn color_attachment(&self, index: usize) -> AttachmentTexture {
         self.color_attachments()[index]
     }
 
@@ -320,7 +347,9 @@ impl Framebuffer {
             .iter()
             .copied()
             .filter(|tv| !tv.is_null())
+            .map(From::from)
             .collect();
+        let depth_attachment = depth_attachment.map(From::from);
 
         Ok(Self {
             id: FramebufferId(id),
