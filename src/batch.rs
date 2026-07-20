@@ -1,4 +1,4 @@
-use janus::texture::{TextureKey, TextureTarget};
+use janus::texture::{Tex, TextureView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct BatchGroupIndex(usize);
@@ -35,7 +35,11 @@ impl<T: Clone + Copy> BatchManager<T> {
     /// This operation is O(n) depending on the number of batches in the list:
     /// usually the number of batches is not very high, especially if you are
     /// making use of texture atlases, so the overhead is negligible.
-    pub fn insert(&mut self, element: T, texture: TextureKey) -> (BatchGroupIndex, BatchUnitIndex) {
+    pub fn insert(
+        &mut self,
+        element: T,
+        texture: TextureView,
+    ) -> (BatchGroupIndex, BatchUnitIndex) {
         for (i, batch) in self
             .batches
             .iter_mut()
@@ -105,7 +109,7 @@ pub struct BatchUnitIndex(usize);
 #[derive(Debug, Default, Clone)]
 pub struct Batch<T> {
     array: Vec<T>,
-    units: [Option<TextureKey>; PER_BATCH_UNITS],
+    units: [Option<TextureView>; PER_BATCH_UNITS],
     head: usize,
 }
 impl<T: Clone + Copy> Batch<T> {
@@ -130,9 +134,10 @@ impl<T: Clone + Copy> Batch<T> {
     /// Binds all units' textures as 2D textures.
     pub fn bind_unit_textures(&self) {
         for (i, &texture) in self.units.iter().enumerate() {
-            let texture = texture.unwrap_or_default();
-            let unit = i as u32;
-            janus::texture::bind_without_meta(TextureTarget::Flat, texture, unit);
+            if let Some(texture) = texture {
+                let unit = i as u32;
+                texture.bind(unit);
+            }
         }
     }
 
@@ -151,7 +156,7 @@ impl<T: Clone + Copy> Batch<T> {
     ///
     /// If the operation is not successful, you should attempt to insert
     /// the element in another batch.
-    pub fn insert(&mut self, element: T, texture: TextureKey) -> Option<BatchUnitIndex> {
+    pub fn insert(&mut self, element: T, texture: TextureView) -> Option<BatchUnitIndex> {
         self.fetch_location_or_create(texture).and_then(|bui| {
             self.array.push(element);
             Some(bui)
@@ -162,7 +167,7 @@ impl<T: Clone + Copy> Batch<T> {
     /// available.
     ///
     /// If one is not available, the function returns `None`.
-    pub fn fetch_location_or_create(&mut self, texture: TextureKey) -> Option<BatchUnitIndex> {
+    pub fn fetch_location_or_create(&mut self, texture: TextureView) -> Option<BatchUnitIndex> {
         let existing = self.fetch_location(texture);
         if let Some(existing) = existing {
             // exists
@@ -180,7 +185,7 @@ impl<T: Clone + Copy> Batch<T> {
     }
 
     /// Look up location associated to the given `texture`.
-    pub fn fetch_location(&self, texture: TextureKey) -> Option<BatchUnitIndex> {
+    pub fn fetch_location(&self, texture: TextureView) -> Option<BatchUnitIndex> {
         self.units
             .iter()
             .position(|key| *key == Some(texture))
@@ -195,11 +200,11 @@ impl<T: Clone + Copy> Batch<T> {
         &mut self.array
     }
 
-    pub fn texture(&self, index: usize) -> Option<TextureKey> {
+    pub fn texture(&self, index: usize) -> Option<TextureView> {
         self.units[index]
     }
 
-    pub fn textures(&self) -> [Option<TextureKey>; PER_BATCH_UNITS] {
+    pub fn textures(&self) -> [Option<TextureView>; PER_BATCH_UNITS] {
         self.units
     }
 

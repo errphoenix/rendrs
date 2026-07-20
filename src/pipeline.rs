@@ -3,7 +3,7 @@ use ethel::{
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::texture::{
-    ImageFormat, ImageType, Texture, TextureFiltering, TextureTarget, TextureView,
+    ImageFormat, ImageType, Tex, Texture, TextureFiltering, TextureKind, TextureView,
 };
 
 use crate::framebuffer::{Framebuffer, FramebufferError, FramebufferView, HasFramebuffer};
@@ -13,6 +13,7 @@ pub struct RenderTargetDescriptor {
     format: ImageFormat,
     pixel_type: ImageType,
     filtering: TextureFiltering,
+    hardware_mip_levels: i32,
     resolution_relative_scale: f32,
 }
 impl Default for RenderTargetDescriptor {
@@ -21,6 +22,7 @@ impl Default for RenderTargetDescriptor {
             format: ImageFormat::Rgb,
             pixel_type: ImageType::Bits8,
             filtering: TextureFiltering::Linear,
+            hardware_mip_levels: 0,         // no mipmapping
             resolution_relative_scale: 1.0, // full resolution
         }
     }
@@ -30,12 +32,14 @@ impl RenderTargetDescriptor {
         format: ImageFormat,
         pixel_type: ImageType,
         filtering: TextureFiltering,
+        hardware_mip_levels: i32,
         resolution_relative_scale: f32,
     ) -> Self {
         Self {
             format,
             pixel_type,
             filtering,
+            hardware_mip_levels,
             resolution_relative_scale,
         }
     }
@@ -50,6 +54,10 @@ impl RenderTargetDescriptor {
 
     pub const fn filtering(&self) -> TextureFiltering {
         self.filtering
+    }
+
+    pub const fn hardware_mip_levels(&self) -> i32 {
+        self.hardware_mip_levels
     }
 
     pub const fn resolution_relative_scale(&self) -> f32 {
@@ -74,9 +82,10 @@ impl RenderTarget {
         janus::debug_assert_gl!();
 
         let resolution = Self::scale_resolution(descriptor.resolution_relative_scale, resolution);
-        let texture = Texture::empty(
+        let texture = Texture::new_2d(
             resolution.0 as i32,
             resolution.1 as i32,
+            descriptor.hardware_mip_levels,
             descriptor.pixel_type,
             descriptor.format,
         );
@@ -95,9 +104,10 @@ impl RenderTarget {
 
         if scaled_resolution != self.cached_resolution {
             self.cached_resolution = scaled_resolution;
-            self.texture = Texture::empty(
+            self.texture = Texture::new_2d(
                 scaled_resolution.0 as i32,
                 scaled_resolution.1 as i32,
+                self.descriptor.hardware_mip_levels,
                 self.descriptor.pixel_type,
                 self.descriptor.format,
             );
@@ -399,7 +409,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
             let mut outputs: [TextureView; O] = std::array::from_fn(|i| self.outputs[i].texture());
 
             // since all attachments must have the same size, any will do
-            let fb_size = outputs.get(0).map(TextureView::size).unwrap_or((1, 1));
+            let fb_size = outputs.get(0).map(Tex::size).unwrap_or((1, 1));
 
             let depth_i = self
                 .outputs
@@ -411,12 +421,12 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
                     if O == 1 {
                         // no color attachments, the only output was depth
                         // default/null textures are ignored
-                        outputs = [TextureView::default(); O];
+                        outputs = [TextureView::null(TextureKind::Dim2D); O];
                     } else {
                         // shift elements after depth to the left to preserve
                         // color outputs order, then set depth to null
                         outputs[depth_i..].rotate_left(1);
-                        outputs[O - 1] = TextureView::default();
+                        outputs[O - 1] = TextureView::null(TextureKind::Dim2D);
                     }
                 }
             }
@@ -441,7 +451,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
             let texture = sampler.texture();
-            janus::texture::bind(TextureTarget::Flat, texture, unit);
+            texture.bind(unit);
         });
     }
 
@@ -524,7 +534,7 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
             let texture = sampler.texture();
-            janus::texture::bind(TextureTarget::Flat, texture, unit);
+            texture.bind(unit);
         });
     }
 
