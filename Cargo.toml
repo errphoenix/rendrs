@@ -15,4 +15,5 @@ tracing = "0.1.44"
 default = ["framebuffer", "batching", "pipeline"]
 pipeline = ["framebuffer", "dep:paste"]
 framebuffer = []
+pack = []
 batching = []

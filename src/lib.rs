@@ -2,7 +2,8 @@
 pub mod batch;
 #[cfg(feature = "framebuffer")]
 pub mod framebuffer;
-
+#[cfg(feature = "pack")]
+pub mod pack;
 #[cfg(feature = "pipeline")]
 pub mod pipeline;
 
