@@ -7,6 +7,7 @@ edition = "2024"
 ethel = { path = "../ethel" }
 janus = { path = "../janus", default-features = false, features = ["expose_gl", "textures"] }
 paste = { version = "1.0.15", optional = true }
+glam = { version = "=0.31.0", optional = true }
 thiserror = "2.0.18"
 tinyvec = "1.12.0"
 tracing = "0.1.44"
@@ -15,5 +16,6 @@ tracing = "0.1.44"
 default = ["framebuffer", "batching", "pipeline"]
 pipeline = ["framebuffer", "dep:paste"]
 framebuffer = []
-pack = []
+glam = ["dep:glam"]
+pack = ["glam"]
 batching = []
