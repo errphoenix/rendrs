@@ -56,3 +56,64 @@ pub const LIB_LIGHT_ATTENUATE_DISTANCE_FALLOFF: GlslLib = ethel::shader_glsl_lib
         return v * v;
     "
 };
+
+/// Spotlight falloff curve through standard penumbra/umbra, squared.
+///
+/// Creates the `lightSpotlightFalloff` function with the following parameters:
+/// * `float penumbra_cos` the cosine angle of the penumbra angle of
+///    the spotlight.
+/// * `float umbra_cos` the cosine angle of the umbra angle of
+///    the spotlight.
+/// * `float surfaece_cos` the cosine angle of the angle between the
+///    spotlight's direction and vector pointing from the surface to the
+///    light.
+///
+/// This is exclusive with [`LIB_LIGHT_SPOTLIGHT_FALLOFF_SMOOTHED`] and
+/// shaders will fail to compile if they are both defined.
+///
+/// According to "Real-time Rendering", this falloff function is used in the
+/// Frostbite game engine.
+pub const LIB_LIGHT_SPOTLIGHT_FALLOFF_SQ: GlslLib = ethel::shader_glsl_lib! {
+    float lightSpotlightFalloff [
+        penumbra_cos : float,
+        umbra_cos    : float,
+        surface_cos  : float
+    ] => "
+        float n = surface_cos - umbra_cos;
+        float d = penumbra_cos - umbra_cos;
+        float t = n / d;
+        float u = clamp(t, 0.0, 1.0);
+        return u * u;
+    "
+};
+
+/// Spotlight falloff curve through standard penumbra/umbra, plus a smoothstep.
+///
+/// Creates the `lightSpotlightFalloff` function with the following parameters:
+/// * `float penumbra_cos` the cosine angle of the penumbra angle of
+///    the spotlight.
+/// * `float umbra_cos` the cosine angle of the umbra angle of
+///    the spotlight.
+/// * `float surfaece_cos` the cosine angle of the angle between the
+///    spotlight's direction and vector pointing from the surface to the
+///    light.
+///
+/// This is exclusive with [`LIB_LIGHT_SPOTLIGHT_FALLOFF_SMOOTHED`] and
+/// shaders will fail to compile if they are both defined.
+///
+/// According to "Real-time Rendering", this falloff function is used in the
+/// `three.js` browser graphics library.
+pub const LIB_LIGHT_SPOTLIGHT_FALLOFF_SMOOTHED: GlslLib = ethel::shader_glsl_lib! {
+    float lightSpotlightFalloff [
+        penumbra_cos : float,
+        umbra_cos    : float,
+        surface_cos  : float
+    ] => "
+        float n = surface_cos - umbra_cos;
+        float d = penumbra_cos - umbra_cos;
+        float t = n / d;
+        float u = clamp(t, 0.0, 1.0);
+        float v = u * u;
+        return v * (3.0 - 2.0 * u);
+    "
+};
