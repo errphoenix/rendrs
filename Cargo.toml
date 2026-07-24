@@ -14,9 +14,10 @@ tracing = "0.1.44"
 indoc = { version = "2.0.7", optional = true }
 
 [features]
-default = ["framebuffer", "batching", "pipeline"]
+default = ["framebuffer", "batching", "pipeline", "graphics"]
 pipeline = ["framebuffer", "dep:paste"]
 framebuffer = []
 glam = ["dep:glam"]
-pack = ["glam", "dep:indoc"]
+pack = ["dep:indoc"]
 batching = []
+graphics = ["dep:indoc"]
