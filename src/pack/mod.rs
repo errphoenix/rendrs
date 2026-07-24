@@ -1,4 +1,4 @@
-pub mod shader;
+pub mod glsl;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Oct3x2Float32 {
@@ -35,6 +35,66 @@ impl Oct3x2Float32 {
         glam::vec3(x, y, z)
     }
 }
+#[cfg(feature = "glam")]
+impl From<glam::Vec3> for Oct3x2Float32 {
+    fn from(value: glam::Vec3) -> Self {
+        Self::from_glam(value)
+    }
+}
+#[cfg(feature = "glam")]
+impl Into<glam::Vec3> for Oct3x2Float32 {
+    fn into(self) -> glam::Vec3 {
+        self.decode_glam()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+pub struct Spherical3x2Float32 {
+    pub x: f32,
+    pub y: f32,
+}
+impl Spherical3x2Float32 {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        let (x, y) = spherical_encode(x, y, z);
+        Self { x, y }
+    }
+
+    pub fn from_array(components: [f32; 3]) -> Self {
+        Self::new(components[0], components[1], components[2])
+    }
+
+    #[cfg(feature = "glam")]
+    pub fn from_glam(vector: glam::Vec3) -> Self {
+        Self::new(vector.x, vector.y, vector.z)
+    }
+
+    pub fn decode(self) -> (f32, f32, f32) {
+        spherical_decode(self.x, self.y)
+    }
+
+    pub fn decode_array(self) -> [f32; 3] {
+        let (x, y, z) = self.decode();
+        [x, y, z]
+    }
+
+    #[cfg(feature = "glam")]
+    pub fn decode_glam(self) -> glam::Vec3 {
+        let (x, y, z) = self.decode();
+        glam::vec3(x, y, z)
+    }
+}
+#[cfg(feature = "glam")]
+impl From<glam::Vec3> for Spherical3x2Float32 {
+    fn from(value: glam::Vec3) -> Self {
+        Self::from_glam(value)
+    }
+}
+#[cfg(feature = "glam")]
+impl Into<glam::Vec3> for Spherical3x2Float32 {
+    fn into(self) -> glam::Vec3 {
+        self.decode_glam()
+    }
+}
 
 const fn octahedron_wrap(x: f32, y: f32) -> (f32, f32) {
     (
@@ -67,4 +127,20 @@ fn octahedron_decode(x: f32, y: f32) -> (f32, f32, f32) {
     y += v;
     let l = (x * x + y * y + z * z).sqrt();
     (x / l, y / l, z / l)
+}
+
+fn spherical_encode(x: f32, y: f32, z: f32) -> (f32, f32) {
+    const INV_PI: f32 = 1.0 / std::f32::consts::PI;
+    let x = y.atan2(x) * INV_PI;
+    let y = z;
+    (x * 0.5 + 0.5, y * 0.5 + 0.5)
+}
+
+fn spherical_decode(x: f32, y: f32) -> (f32, f32, f32) {
+    const PI: f32 = std::f32::consts::PI;
+    let x = x * 2.0 - 1.0;
+    let y = y * 2.0 - 1.0;
+    let scth = (x * PI).sin_cos();
+    let phi = (1.0 - y * y).sqrt();
+    (scth.1 * phi, scth.0 * phi, y)
 }
