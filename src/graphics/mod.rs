@@ -129,30 +129,49 @@ pub struct MappedTiles<const TILE_W: u32, const TILE_H: u32> {
     col_count: u32,
     row_count: u32,
     pointer: Option<LightListPtr>,
+    buffer_offset: u32, // n of elem.
 }
 impl<const TILE_W: u32, const TILE_H: u32> MappedTiles<TILE_W, TILE_H> {
-    pub fn new(resolution: ethel::render::Resolution, buffer: &TriBuffer<Tile>) -> Self {
+    /// Create a new vertical slice of tiles for screen partitioning.
+    ///
+    /// Requires the global `buffer` owning all screen [`tiles`](Tile) and a
+    /// `offset` into the buffer.
+    ///
+    /// Computes the size of its view into the `buffer` depending on the
+    /// current screen `resolution`.
+    ///
+    /// The `offset` is intended to be used for clustered screen partitioning,
+    /// as it represents the number of all 'previous' tiles that are part of
+    /// the preceding depth slices, as managed by [`Clusters`].
+    pub fn new(
+        resolution: ethel::render::Resolution,
+        buffer: &TriBuffer<Tile>,
+        offset: u32,
+    ) -> Self {
         let resolution = PixelResolution::from(resolution);
         let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(resolution);
         let tile_count = col_count * row_count;
-        let pointer = Some(Self::get_pointer(tile_count, buffer));
+        let pointer = Some(Self::get_pointer(tile_count, buffer, byte_offset));
         Self {
             resolution,
             col_count,
             row_count,
             pointer,
+            buffer_offset: offset,
         }
     }
 
-    fn get_pointer(tile_count: u32, buffer: &TriBuffer<Tile>) -> LightListPtr {
+    fn get_pointer(tile_count: u32, buffer: &TriBuffer<Tile>, offset: u32) -> LightListPtr {
         LightListPtr {
-            ptr_buffered: std::array::from_fn(|i| unsafe { buffer.raw_section(i) }),
+            ptr_buffered: std::array::from_fn(|i| unsafe {
+                buffer.raw_section(i).add(offset as usize)
+            }),
             length: tile_count,
         }
     }
 
     pub fn revalidate_pointer(&mut self, buffer: &TriBuffer<Tile>) {
-        self.pointer = Some(Self::get_pointer(self.len(), buffer));
+        self.pointer = Some(Self::get_pointer(self.len(), buffer, self.buffer_offset));
     }
 
     /// Recompute the tile sizes on resolution change.
