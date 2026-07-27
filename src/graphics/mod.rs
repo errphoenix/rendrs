@@ -43,7 +43,7 @@ impl TilesBuffer {
     ///
     /// The `max_allocated_resolution` will be the **maximum** screen
     /// resolution representable.
-    pub fn new<const TILE_W: usize, const TILE_H: usize>(
+    pub fn new<const TILE_W: u32, const TILE_H: u32>(
         max_allocated_resolution: PixelResolution,
     ) -> Self {
         let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(max_allocated_resolution);
@@ -71,29 +71,30 @@ impl TilesBuffer {
     }
 }
 
-pub type SquareTiles<const TILE_SIZE: usize> = SizedTiles<TILE_SIZE, TILE_SIZE>;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct LightIndex(pub u32);
 
 /// Returns the number of columns and rows of tiles to represent the screen
 /// `resolution`.
-fn screen_div_tiles<const TILE_W: usize, const TILE_H: usize>(
+fn screen_div_tiles<const TILE_W: u32, const TILE_H: u32>(
     resolution: PixelResolution,
 ) -> (u32, u32) {
     (
-        resolution.width.div_ceil(TILE_W as u32),
-        resolution.height.div_ceil(TILE_H as u32),
+        resolution.width.div_ceil(TILE_W),
+        resolution.height.div_ceil(TILE_H),
     )
 }
 
-pub struct SizedTiles<const TILE_W: usize, const TILE_H: usize> {
+pub type MappedSquareTiles<const TILE_SIZE: u32> = MappedTiles<TILE_SIZE, TILE_SIZE>;
+
+#[derive(Debug, Clone)]
+pub struct MappedTiles<const TILE_W: u32, const TILE_H: u32> {
     resolution: PixelResolution,
     col_count: u32,
     row_count: u32,
     list: Vec<Tile>,
 }
-impl<const TILE_W: usize, const TILE_H: usize> SizedTiles<TILE_W, TILE_H> {
+impl<const TILE_W: u32, const TILE_H: u32> MappedTiles<TILE_W, TILE_H> {
     pub fn new(resolution: ethel::render::Resolution) -> Self {
         let resolution = PixelResolution::from(resolution);
         let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(resolution);
@@ -136,17 +137,28 @@ impl<const TILE_W: usize, const TILE_H: usize> SizedTiles<TILE_W, TILE_H> {
         self.col_count * self.row_count
     }
 
-    pub fn get(&self) -> &[Tile] {
-        &self.list
-    }
-
-    pub fn get_mut(&mut self) -> &mut [Tile] {
-        &mut self.list
+    /// Get an immutable view of the underlying triple buffer.
+    ///
+    /// # Returns
+    /// `None` if the pointer is not valid after a resolution change.
+    pub unsafe fn view(&self, section: usize) -> Option<&[Tile]> {
+        assert!(
+            section > 0 && section < 3,
+            "triple buffer section index must be within 0-2 range"
+        );
+        if let Some(ptr) = &self.pointer {
+            // SAFETY: responsability moved to view
+            Some(unsafe { ptr.view(section) })
+        } else {
+            None
+        }
     }
 }
 
 pub const PER_TILE_MAX_LIGHTS: usize = 128;
 
+// GPU-side representation of a tile.
+#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Tile(pub [LightIndex; PER_TILE_MAX_LIGHTS]);
 impl Default for Tile {
