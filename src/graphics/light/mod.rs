@@ -1,6 +1,15 @@
 pub mod shader;
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LightVolume {
+    pub pos_x: f32,
+    pub pos_y: f32,
+    pub pos_z: f32,
+    pub radius: f32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Light {
     pub pos_x: f32,
@@ -85,6 +94,7 @@ impl Light {
         falloff_exp: f32,
         inner_size: f32,
         outer_size: f32,
+        max_radius: f32,
     ) -> Self {
         Self::new_const(
             position,
@@ -92,7 +102,7 @@ impl Light {
             color,
             intensity,
             falloff_exp,
-            LightParams::spotlight(inner_size, outer_size),
+            LightParams::spotlight(inner_size, outer_size, max_radius),
         )
     }
 
@@ -157,6 +167,7 @@ impl Light {
         falloff_exp: f32,
         inner_size: f32,
         outer_size: f32,
+        max_radius: f32,
     ) -> Self {
         let position = position.into();
         let direction = direction.into();
@@ -169,7 +180,26 @@ impl Light {
             falloff_exp,
             inner_size,
             outer_size,
+            max_radius,
         )
+    }
+
+    /// The approximate spherical bounding volume representing the effective
+    /// radius of the light.
+    ///
+    /// Returns `None` if this is a directional light, as it has no defined
+    /// boundaries.
+    pub const fn volume(&self) -> Option<LightVolume> {
+        if self.params.is_directional() {
+            None
+        } else {
+            Some(LightVolume {
+                pos_x: self.pos_x,
+                pos_y: self.pos_y,
+                pos_z: self.pos_z,
+                radius: self.params.max_radius,
+            })
+        }
     }
 }
 
@@ -179,7 +209,7 @@ pub const KIND_FLAG_SPOTLIGHT: f32 = 3.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct LightParams {
-    pub omni_max_radius: f32,
+    pub max_radius: f32,
     pub spot_inner_size: f32,
     pub spot_outer_size: f32,
     pub kind_flag: f32,
@@ -192,7 +222,7 @@ impl Default for LightParams {
 impl LightParams {
     pub const fn directional() -> Self {
         Self {
-            omni_max_radius: 0f32,
+            max_radius: 0f32,
             spot_inner_size: 0f32,
             spot_outer_size: 0f32,
             kind_flag: KIND_FLAG_DIRECTIONAL,
@@ -201,25 +231,25 @@ impl LightParams {
 
     pub const fn omni(max_radius: f32) -> Self {
         Self {
-            omni_max_radius: max_radius,
+            max_radius,
             spot_inner_size: 0f32,
             spot_outer_size: 0f32,
             kind_flag: KIND_FLAG_OMNI,
         }
     }
 
-    pub const fn spotlight(inner_size: f32, outer_size: f32) -> Self {
+    pub const fn spotlight(inner_size: f32, outer_size: f32, max_radius: f32) -> Self {
         Self {
-            omni_max_radius: 0f32,
+            max_radius,
             spot_inner_size: inner_size,
             spot_outer_size: outer_size,
             kind_flag: KIND_FLAG_SPOTLIGHT,
         }
     }
 
-    pub const fn spotlight_no_umbra(size: f32) -> Self {
+    pub const fn spotlight_no_umbra(size: f32, max_radius: f32) -> Self {
         Self {
-            omni_max_radius: 0f32,
+            max_radius,
             spot_inner_size: size,
             spot_outer_size: size,
             kind_flag: KIND_FLAG_SPOTLIGHT,

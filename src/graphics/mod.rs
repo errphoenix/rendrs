@@ -135,7 +135,7 @@ impl ClusterDepthCurve {
         })
     }
 
-    pub fn slice_at_z<const D: usize>(&self, z: f32, near: f32, far: f32) -> usize {
+    pub fn slice_at_z<const D: usize>(&self, z: f32, (near, far): (f32, f32)) -> usize {
         let length = far - near;
         let t = self.evaluate_inner(z) / self.evaluate_inner(length);
         (D as f32 * t).floor() as usize
@@ -237,9 +237,7 @@ impl<const W: usize, const H: usize, const D: usize> Clusters<W, H, D> {
         if z < self.frustum_depth.0 || z > self.frustum_depth.1 {
             return None;
         }
-        let slice_index =
-            self.depth_curve
-                .slice_at_z::<D>(z, self.frustum_depth.0, self.frustum_depth.1);
+        let slice_index = self.depth_curve.slice_at_z::<D>(z, self.frustum_depth);
         // SAFETY: responsability moved to cluster_at
         unsafe { self.cluster_of_slice_at(x, y, slice_index, section) }
     }
