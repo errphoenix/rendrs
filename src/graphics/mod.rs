@@ -151,7 +151,7 @@ impl<const TILE_W: u32, const TILE_H: u32> MappedTiles<TILE_W, TILE_H> {
         let resolution = PixelResolution::from(resolution);
         let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(resolution);
         let tile_count = col_count * row_count;
-        let pointer = Some(Self::get_pointer(tile_count, buffer, byte_offset));
+        let pointer = Some(Self::get_pointer(tile_count, buffer, offset));
         Self {
             resolution,
             col_count,
