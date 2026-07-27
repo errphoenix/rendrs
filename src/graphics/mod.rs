@@ -15,8 +15,8 @@ impl LightsBuffer {
         }
     }
 
-    pub fn get(&self, section: usize) -> View<'_, Light> {
-        self.mapped.view_section(section)
+    pub unsafe fn get(&self, section: usize) -> View<'_, Light> {
+        unsafe { self.mapped.view_section(section) }
     }
 
     /// Get mutable access to a `section` of the underlying triple buffer.
@@ -31,7 +31,7 @@ impl LightsBuffer {
     /// This is meant to be used in accordance to the triple buffer manager
     /// [`ethel::data::cross::Cross`] to ensure safety.
     pub unsafe fn get_mut(&self, section: usize) -> ViewMut<'_, Light> {
-        self.mapped.view_section_mut(section)
+        unsafe { self.mapped.view_section_mut(section) }
     }
 }
 
@@ -60,8 +60,8 @@ impl TilesBuffer {
         Self(TriBuffer::zeroed(total_tiles as usize))
     }
 
-    pub fn get(&self, section: usize) -> View<'_, Tile> {
-        self.0.view_section(section)
+    pub unsafe fn get(&self, section: usize) -> View<'_, Tile> {
+        unsafe { self.0.view_section(section) }
     }
 
     /// Get mutable access to a `section` of the underlying triple buffer.
@@ -75,8 +75,8 @@ impl TilesBuffer {
     ///
     /// This is meant to be used in accordance to the triple buffer manager
     /// [`ethel::data::cross::Cross`] to ensure safety.
-    pub fn get_mut(&mut self, section: usize) -> ViewMut<'_, Tile> {
-        self.0.view_section_mut(section)
+    pub unsafe fn get_mut(&mut self, section: usize) -> ViewMut<'_, Tile> {
+        unsafe { self.0.view_section_mut(section) }
     }
 }
 
@@ -97,6 +97,10 @@ impl<const W: usize, const H: usize> ClusterSlice<W, H> {
 
     pub fn invalidate(&mut self) {
         self.inner.invalidate();
+    }
+
+    pub fn depth_level(&self) -> f32 {
+        self.depth_level
     }
 }
 
