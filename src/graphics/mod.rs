@@ -4,34 +4,70 @@ use ethel::render::buffer::{TriBuffer, View, ViewMut};
 #[allow(unused_imports)]
 pub use light::{Light, LightParams};
 
+use crate::graphics::light::LightVolume;
+
 #[derive(Debug, Default)]
 pub struct LightsBuffer {
-    mapped: TriBuffer<Light>,
+    lighting_data: TriBuffer<Light>,
+    volume_data: TriBuffer<LightVolume>,
 }
 impl LightsBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            mapped: TriBuffer::zeroed(capacity),
+            lighting_data: TriBuffer::zeroed(capacity),
+            volume_data: TriBuffer::zeroed(capacity),
         }
     }
 
-    pub unsafe fn get(&self, section: usize) -> View<'_, Light> {
-        unsafe { self.mapped.view_section(section) }
+    pub fn bind_shader_storage(&self, section: usize, lighting: u32, volumes: u32, offset: u32) {
+        self.lighting_data
+            .bind_shader_storage(section, lighting, offset);
+        self.volume_data
+            .bind_shader_storage(section, volumes, offset);
     }
 
-    /// Get mutable access to a `section` of the underlying triple buffer.
+    /// Get read access to a `section` of the underlying triple buffer.
     ///
     /// # Panics
     /// Will panic if section is not within the 0-2 range.
     ///
     /// # Safety
     /// The caller must manually ensure the section of this triple buffer
-    /// is currently not being read or modified somewhere else.
+    /// is currently not being mutated somewhere else.
     ///
     /// This is meant to be used in accordance to the triple buffer manager
     /// [`ethel::data::cross::Cross`] to ensure safety.
-    pub unsafe fn get_mut(&self, section: usize) -> ViewMut<'_, Light> {
-        unsafe { self.mapped.view_section_mut(section) }
+    pub unsafe fn get_light(&self, section: usize) -> View<'_, Light> {
+        unsafe { self.lighting_data.view_section(section) }
+    }
+
+    /// Get read access to a `section` of the underlying triple buffer.
+    ///
+    /// # Panics
+    /// Will panic if section is not within the 0-2 range.
+    ///
+    /// # Safety
+    /// The caller must manually ensure the section of this triple buffer
+    /// is currently not being mutated somewhere else.
+    ///
+    /// This is meant to be used in accordance to the triple buffer manager
+    /// [`ethel::data::cross::Cross`] to ensure safety.
+    pub unsafe fn get_volume(&self, section: usize) -> View<'_, LightVolume> {
+        unsafe { self.volume_data.view_section(section) }
+    }
+
+    /// Get mutable access to a `section` of the underlying triple buffer.
+    ///
+    /// See [`Self::get_light`].
+    pub unsafe fn get_light_mut(&self, section: usize) -> ViewMut<'_, Light> {
+        unsafe { self.lighting_data.view_section_mut(section) }
+    }
+
+    /// Get mutable access to a `section` of the underlying triple buffer.
+    ///
+    /// See [`Self::get_volume`].
+    pub unsafe fn get_volume_mut(&self, section: usize) -> ViewMut<'_, LightVolume> {
+        unsafe { self.volume_data.view_section_mut(section) }
     }
 }
 
