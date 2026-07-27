@@ -173,9 +173,9 @@ impl Light {
     }
 }
 
-pub const KIND_FLAG_DIRECTIONAL: f32 = 0.0;
-pub const KIND_FLAG_OMNI: f32 = 1.0;
-pub const KIND_FLAG_SPOTLIGHT: f32 = 2.0;
+pub const KIND_FLAG_DIRECTIONAL: f32 = 1.0;
+pub const KIND_FLAG_OMNI: f32 = 2.0;
+pub const KIND_FLAG_SPOTLIGHT: f32 = 3.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct LightParams {
