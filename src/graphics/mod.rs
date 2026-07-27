@@ -121,22 +121,23 @@ impl ClusterDepthCurve {
             ClusterDepthCurve::Exponential => x.exp(),
             ClusterDepthCurve::Quadratic => x * x,
             ClusterDepthCurve::Cubic => x * x * x,
-            ClusterDepthCurve::Logarithmic => (x + 1f32).ln(),
+            ClusterDepthCurve::Logarithmic => x.ln(),
             ClusterDepthCurve::Custom(func) => func(x),
         }
     }
 
-    pub fn evaluate<const D: usize>(&self, length: f32) -> [f32; D] {
-        let section = length / D as f32;
+    pub fn evaluate<const D: usize>(&self, (near, far): (f32, f32)) -> [f32; D] {
+        let far_curved = self.evaluate_inner(far);
+        let section = far / D as f32;
         std::array::from_fn(|i| {
             let param = i as f32 * section;
-            self.evaluate_inner(param)
+            self.evaluate_inner(param + near) / far_curved * far
         })
     }
 
-    pub fn slice_at_z<const D: usize>(&self, z: f32, length: f32) -> usize {
-        let w = self.evaluate_inner(z);
-        let t = w / length;
+    pub fn slice_at_z<const D: usize>(&self, z: f32, near: f32, far: f32) -> usize {
+        let length = far - near;
+        let t = self.evaluate_inner(z) / self.evaluate_inner(length);
         (D as f32 * t).floor() as usize
     }
 }
@@ -146,7 +147,7 @@ pub struct Clusters<const W: usize, const H: usize, const D: usize> {
     resolution: PixelResolution,
     per_slice_col_count: u32,
     per_slice_row_count: u32,
-    frustum_depth: f32,
+    frustum_depth: (f32, f32),
     depth_curve: ClusterDepthCurve,
     slices: [ClusterSlice<W, H>; D],
 }
@@ -155,13 +156,14 @@ impl<const W: usize, const H: usize, const D: usize> Clusters<W, H, D> {
         resolution: ethel::render::Resolution,
         buffer: &TriBuffer<Tile>,
         depth_curve: ClusterDepthCurve,
-        frustum_depth: f32,
+        frustum_near: f32,
+        frustum_far: f32,
     ) -> Self {
         let resolution = PixelResolution::from(resolution);
         let (col_count, row_count) = screen_div_tiles::<W, H>(resolution);
         let per_slice_tile_count = col_count * row_count;
 
-        let depths = depth_curve.evaluate::<D>(frustum_depth);
+        let depths = depth_curve.evaluate::<D>((frustum_near, frustum_far));
         let mut slices = [ClusterSlice::default(); D];
         slices
             .iter_mut()
@@ -185,9 +187,27 @@ impl<const W: usize, const H: usize, const D: usize> Clusters<W, H, D> {
             resolution,
             per_slice_col_count: col_count,
             per_slice_row_count: row_count,
-            frustum_depth,
+            frustum_depth: (frustum_near, frustum_far),
             depth_curve,
             slices,
+        }
+    }
+
+    pub fn set_frustum(&mut self, near: Option<f32>, far: Option<f32>) {
+        let mut changed = false;
+        if let Some(near) = near {
+            changed |= near != self.frustum_depth.0;
+            self.frustum_depth.0 = near;
+        }
+        if let Some(far) = far {
+            changed |= far != self.frustum_depth.1;
+            self.frustum_depth.1 = far;
+        }
+        if changed {
+            let depths = self.depth_curve.evaluate::<D>(self.frustum_depth);
+            self.slices.iter_mut().enumerate().for_each(|(i, slice)| {
+                slice.depth_level = depths[i];
+            });
         }
     }
 
@@ -202,7 +222,7 @@ impl<const W: usize, const H: usize, const D: usize> Clusters<W, H, D> {
     ///
     /// This will invalidate the underlying pointer to the triple buffer,
     /// requiring a [`Self::revalidate_pointer`] call.
-    pub fn revalidate_resolution(&mut self, resolution: ethel::render::Resolution) {
+    pub fn set_resolution(&mut self, resolution: ethel::render::Resolution) {
         if resolution.is_changed() {
             self.resolution = PixelResolution::from(resolution);
             let (col_count, row_count) = screen_div_tiles::<W, H>(self.resolution);
@@ -214,10 +234,12 @@ impl<const W: usize, const H: usize, const D: usize> Clusters<W, H, D> {
     }
 
     pub unsafe fn cluster_at(&self, x: u32, y: u32, z: f32, section: usize) -> Option<&Tile> {
-        if z < 0.0 || z > self.frustum_depth {
+        if z < self.frustum_depth.0 || z > self.frustum_depth.1 {
             return None;
         }
-        let slice_index = self.depth_curve.slice_at_z::<D>(z, self.frustum_depth);
+        let slice_index =
+            self.depth_curve
+                .slice_at_z::<D>(z, self.frustum_depth.0, self.frustum_depth.1);
         // SAFETY: responsability moved to cluster_at
         unsafe { self.cluster_of_slice_at(x, y, slice_index, section) }
     }
@@ -408,7 +430,7 @@ impl<const TILE_W: usize, const TILE_H: usize> MappedTiles<TILE_W, TILE_H> {
     ///
     /// This will invalidate the underlying pointer to the triple buffer,
     /// requiring a [`Self::revalidate_pointer`] call.
-    pub fn revalidate_resolution(&mut self, resolution: ethel::render::Resolution) {
+    pub fn set_resolution(&mut self, resolution: ethel::render::Resolution) {
         if resolution.is_changed() {
             self.resolution = PixelResolution::from(resolution);
             let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(self.resolution);
