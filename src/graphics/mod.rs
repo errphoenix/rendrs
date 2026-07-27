@@ -51,6 +51,15 @@ impl TilesBuffer {
         Self(TriBuffer::zeroed(total_tiles as usize))
     }
 
+    pub fn new_3d<const TILE_W: u32, const TILE_H: u32>(
+        max_allocated_resolution: PixelResolution,
+        depth_slices: u32,
+    ) -> Self {
+        let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(max_allocated_resolution);
+        let total_tiles = col_count * row_count * depth_slices;
+        Self(TriBuffer::zeroed(total_tiles as usize))
+    }
+
     pub fn get(&self, section: usize) -> View<'_, Tile> {
         self.0.view_section(section)
     }
@@ -85,6 +94,33 @@ fn screen_div_tiles<const TILE_W: u32, const TILE_H: u32>(
     )
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct LightListPtr {
+    ptr_buffered: [*mut Tile; 3],
+    length: u32,
+}
+impl LightListPtr {
+    pub unsafe fn view(&self, section: usize) -> &[Tile] {
+        assert!(
+            section > 0 && section < 3,
+            "triple buffer section index must be within 0-2 range"
+        );
+
+        let ptr = self.ptr_buffered[section];
+        unsafe { std::slice::from_raw_parts(ptr as *const Tile, self.length as usize) }
+    }
+
+    pub unsafe fn view_mut(&self, section: usize) -> &mut [Tile] {
+        assert!(
+            section > 0 && section < 3,
+            "triple buffer section index must be within 0-2 range"
+        );
+
+        let ptr = self.ptr_buffered[section];
+        unsafe { std::slice::from_raw_parts_mut(ptr, self.length as usize) }
+    }
+}
+
 pub type MappedSquareTiles<const TILE_SIZE: u32> = MappedTiles<TILE_SIZE, TILE_SIZE>;
 
 #[derive(Debug, Clone)]
@@ -92,32 +128,65 @@ pub struct MappedTiles<const TILE_W: u32, const TILE_H: u32> {
     resolution: PixelResolution,
     col_count: u32,
     row_count: u32,
-    list: Vec<Tile>,
+    pointer: Option<LightListPtr>,
 }
 impl<const TILE_W: u32, const TILE_H: u32> MappedTiles<TILE_W, TILE_H> {
-    pub fn new(resolution: ethel::render::Resolution) -> Self {
+    pub fn new(resolution: ethel::render::Resolution, buffer: &TriBuffer<Tile>) -> Self {
         let resolution = PixelResolution::from(resolution);
         let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(resolution);
         let tile_count = col_count * row_count;
-        let list = vec![Tile::default(); tile_count as usize];
+        let pointer = Some(Self::get_pointer(tile_count, buffer));
         Self {
             resolution,
             col_count,
             row_count,
-            list,
+            pointer,
         }
     }
 
-    pub fn revalidate(&mut self, resolution: ethel::render::Resolution) {
+    fn get_pointer(tile_count: u32, buffer: &TriBuffer<Tile>) -> LightListPtr {
+        LightListPtr {
+            ptr_buffered: std::array::from_fn(|i| unsafe { buffer.raw_section(i) }),
+            length: tile_count,
+        }
+    }
+
+    pub fn revalidate_pointer(&mut self, buffer: &TriBuffer<Tile>) {
+        self.pointer = Some(Self::get_pointer(self.len(), buffer));
+    }
+
+    /// Recompute the tile sizes on resolution change.
+    ///
+    /// This will invalidate the underlying pointer to the triple buffer,
+    /// requiring a [`Self::revalidate_pointer`] call.
+    pub fn revalidate_resolution(&mut self, resolution: ethel::render::Resolution) {
         if resolution.is_changed() {
             self.resolution = PixelResolution::from(resolution);
             let (col_count, row_count) = screen_div_tiles::<TILE_W, TILE_H>(self.resolution);
             if col_count == self.col_count && row_count == self.row_count {
                 return;
             }
+            self.pointer = None;
+        }
+    }
 
-            let tile_count = col_count * row_count;
-            self.list.resize(tile_count as usize, Tile::default());
+    pub unsafe fn tile_at(&self, x: u32, y: u32, section: usize) -> Option<&Tile> {
+        assert!(
+            section > 0 && section < 3,
+            "triple buffer section index must be within 0-2 range"
+        );
+        if x > self.resolution.width || y > self.resolution.height {
+            return None;
+        }
+        if let Some(ptr) = &self.pointer {
+            let col = x / TILE_W;
+            let row = y / TILE_H;
+            let i = (row * self.row_count) + col;
+            // SAFETY: responsability moved to tile_at
+            let list = unsafe { ptr.view(section) };
+            list.get(i as usize)
+        } else {
+            None
         }
     }
 
