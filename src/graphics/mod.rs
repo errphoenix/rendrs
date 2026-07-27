@@ -66,15 +66,8 @@ impl TilesBuffer {
     ///
     /// This is meant to be used in accordance to the triple buffer manager
     /// [`ethel::data::cross::Cross`] to ensure safety.
-    pub unsafe fn get_mut(&self, section: usize) -> ViewMut<'_, Tile> {
+    pub fn get_mut(&mut self, section: usize) -> ViewMut<'_, Tile> {
         self.0.view_section_mut(section)
-    }
-}
-impl std::ops::Deref for TilesBuffer {
-    type Target = TriBuffer<Tile>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
