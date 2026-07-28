@@ -134,26 +134,30 @@ impl Default for MaterialParams {
     }
 }
 
-/// Location of material onto the GPU.
+/// Location of a full material onto the GPU.
 ///
-/// Specifies the material group index, the page of the material group
-/// (which is the layer of the texture array), the width and height of
-/// the texture as a `[0.0 - 1.0]` range.
-#[repr(C)]
+/// Specifies the [`MaterialEntryLocation`] of a diffuse and RSO
+/// (roughness-specular-occlusion) entry as 2 distinct textures.
+///
+/// The diffuse entry is a single RGB texture, RSO is also a single RGB
+/// texture formed from 3 distinct single-channel textures.
+///
+/// This also contains the width and height of the texture as a `[0.0 - 1.0]`
+/// range, which is equal for both entries.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MaterialLocation {
-    group_index: u32,
-    page: u32,
+    diffuse_entry: MaterialEntryLocation,
+    rso_entry: MaterialEntryLocation,
     width: f32,
     height: f32,
 }
 impl MaterialLocation {
-    pub const fn group(&self) -> u32 {
-        self.group_index
+    pub const fn diffuse(&self) -> MaterialEntryLocation {
+        self.diffuse_entry
     }
 
-    pub const fn page(&self) -> u32 {
-        self.page
+    pub const fn rso(&self) -> MaterialEntryLocation {
+        self.rso_entry
     }
 
     pub const fn width(&self) -> f32 {
@@ -162,6 +166,26 @@ impl MaterialLocation {
 
     pub const fn height(&self) -> f32 {
         self.height
+    }
+}
+
+/// Location of single material entry onto the GPU.
+///
+/// Specifies the material group index and the page of the material
+/// group (which is the layer of the texture array)
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct MaterialEntryLocation {
+    group_index: u32,
+    page: u32,
+}
+impl MaterialEntryLocation {
+    pub const fn group(&self) -> u32 {
+        self.group_index
+    }
+
+    pub const fn page(&self) -> u32 {
+        self.page
     }
 }
 
