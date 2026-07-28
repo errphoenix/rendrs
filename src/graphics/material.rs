@@ -1,4 +1,4 @@
-use ethel::assets::RawTexture;
+use ethel::assets::{AssetId, RawTexture};
 use image::{EncodableLayout, RgbImage};
 use janus::{
     StringHash, StringMap,
@@ -216,4 +216,77 @@ impl MaterialLocationRegistry {
     pub fn inner_map(&self) -> &StringMap<MaterialLocation> {
         &self.map
     }
+}
+
+///
+/// group {
+///     // group descriptor
+///     pages: num;
+///     size: num;
+///
+///     entry(id: str) { // material entry descriptor
+///         // single rgb8
+///         diffuse(path str OR asset value);
+///
+///         // RSO
+///         // each is single-channel, coalesce into rgb8
+///         roughness(path str OR asset value);
+///         specular(path str OR asset value);
+///         occlusion(path str OR asset value);
+///         // OR
+///         // optional pre-coalesced rso
+///         rso(path str OR asset value);
+///
+///         // diffuse and RSO are optional, if absent they
+///         // must default to a 1x1 blank pixel texture.
+///     };
+/// };
+///
+
+#[macro_export]
+macro_rules! material_groups {
+    ($(group { $g:tt };)*) => {
+        todo!()
+    };
+}
+
+#[macro_export]
+macro_rules! material_groups_internal {
+    (@group $pages:expr, $size:expr; $($entries:tt)*) => {
+        todo!()
+    };
+}
+
+pub struct MaterialGroupDescriptor {
+    // TODO
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct MaterialDescriptor {
+    /// RGB8 diffuse component (aka albedo)
+    pub diffuse: Option<MaterialComponentSource>,
+    /// RSO (roughness-specular-occlusion) entry
+    pub rso: Option<MaterialRsoDescriptor>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaterialRsoDescriptor {
+    /// Pre-coalesced RSO where each channel represents roughness,
+    /// specular, and occlusion, respectively.
+    Coalesced(MaterialComponentSource),
+    /// Separate non-coalesced RSO where each sub-entry is a separate
+    /// single-channel texture.
+    ///
+    /// This is coalesced into a single RGB texture later.
+    Separate {
+        roughness: Option<MaterialComponentSource>,
+        specular: Option<MaterialComponentSource>,
+        occlusion: Option<MaterialComponentSource>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaterialComponentSource {
+    Path(&'static str),
+    Asset(AssetId),
 }
