@@ -1,4 +1,5 @@
 pub mod light;
+pub mod material;
 
 use ethel::render::buffer::{TriBuffer, View, ViewMut};
 #[allow(unused_imports)]

@@ -12,6 +12,7 @@ thiserror = "2.0.18"
 tinyvec = "1.12.0"
 tracing = "0.1.44"
 indoc = { version = "2.0.7", optional = true }
+image = { version = "0.25.10", optional = true }
 
 [features]
 default = ["framebuffer", "batching", "pipeline", "graphics"]
@@ -20,4 +21,4 @@ framebuffer = []
 glam = ["dep:glam"]
 pack = ["dep:indoc"]
 batching = []
-graphics = ["dep:indoc"]
+graphics = ["dep:indoc", "dep:image", "ethel/assets"]
