@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ethel::assets::{AssetId, RawTexture};
 use image::{EncodableLayout, RgbaImage};
 use janus::{
@@ -38,15 +40,15 @@ impl From<RawTexture> for ValidatedRawTexture {
 #[derive(Debug)]
 pub struct MaterialGroup {
     array_texture_object: Texture,
-    pages: u32,
-    size: u32,
+    size: u16,
+    pages: u16,
 }
 impl MaterialGroup {
-    pub const fn pages(&self) -> u32 {
+    pub const fn pages(&self) -> u16 {
         self.pages
     }
 
-    pub const fn size(&self) -> u32 {
+    pub const fn size(&self) -> u16 {
         self.size
     }
 
@@ -59,7 +61,7 @@ impl MaterialGroup {
         SamplerObject::new(&self.array_texture_object)
     }
 
-    pub fn copy_page(&self, texture: impl Into<ValidatedRawTexture>, page_target: u32) {
+    pub fn copy_to_page(&self, texture: impl Into<ValidatedRawTexture>, page_target: u16) {
         let texture = texture.into();
         let bytes = texture.bytes();
         let width = texture.width();
@@ -115,12 +117,16 @@ impl<const GROUPS: usize> MaterialGroups<GROUPS> {
 /// The 4th field `pad_or_extra` is used as padding, but it is public and can
 /// be used as a custom field if necessary. It is, as default, initialised
 /// as 0 but the other fields are initialised as 1.
+///
+/// These values are not global to a specific material. These are local
+/// values for each rendered entity.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct MaterialParams {
     pub roughness: f32,
     pub metallic: f32,
     pub ambient_occlusion: f32,
+    /// Might be replaced by emissive
     pub pad_or_extra: f32,
 }
 impl Default for MaterialParams {
@@ -224,29 +230,48 @@ impl MaterialLocationRegistry {
 }
 
 ///
-/// group {
+/// group NAME {
 ///     // group descriptor
 ///     pages: num;
 ///     size: num;
 ///
 ///     entry(id: str) { // material entry descriptor
-///         // single rgb8
-///         diffuse(path str OR asset value);
-///
-///         // RSO
-///         // each is single-channel, coalesce into rgb8
-///         roughness(path str OR asset value);
-///         specular(path str OR asset value);
-///         occlusion(path str OR asset value);
+///         // rgb diffuse/albedo
+///         diffuse(path str OR assetid value);
+///         // single-channel optional emissive
+///         emissive(path str OR assetid value);
 ///         // OR
-///         // optional pre-coalesced rso
-///         rso(path str OR asset value);
+///         // optional pre-coalesced diffuse + albedo
+///         diffuse_emissive(path str OR assetid value);
 ///
-///         // diffuse and RSO are optional, if absent they
+///         // RSOD
+///         // each is single-channel, coalesce into rgb8
+///         roughness(path str OR assetid value);
+///         specular(path str OR assetid value);
+///         occlusion(path str OR assetid value);
+///         displacement(path str OR assetid value);
+///         // OR
+///         // optional pre-coalesced rsod
+///         rsod(path str OR assetid value);
+///
+///         // diffuse, emissive, and RSOD are optional, if absent they
 ///         // must default to a 1x1 blank pixel texture.
 ///     };
 /// };
 ///
+
+#[macro_export]
+macro_rules! material_groups_internal {
+    (@group $pages:expr, $size:expr; $($entries:tt)*) => {
+        todo!()
+    };
+
+    (@entry $id: expr, $($comp:tt)*; $($other_entries:tt)*) => {
+
+        $crate::material_groups_internal!(@entry $($other_entries)*);
+    };
+    (@entry) => {};
+}
 
 #[macro_export]
 macro_rules! material_groups {
@@ -255,38 +280,121 @@ macro_rules! material_groups {
     };
 }
 
-#[macro_export]
-macro_rules! material_groups_internal {
-    (@group $pages:expr, $size:expr; $($entries:tt)*) => {
-        todo!()
-    };
-}
-
+#[derive(Clone, Debug)]
 pub struct MaterialGroupDescriptor {
-    // TODO
+    pub group_index: u32,
+    pub pages: u16,
+    pub size: u16,
+
+    // both mapped by material-id
+    pub desciptors: StringMap<MaterialDescriptor>,
+    pub materials: StringMap<MaterialLocation>,
+
+    /// Cached page indices allocated to entries that were already processed,
+    /// avoiding duplicate entries in the final material texture array.
+    pub cached_entries: HashMap<MaterialEntryDescriptor, u16>,
+}
+impl MaterialGroupDescriptor {
+    pub fn new(group_index: u32, pages: u16, size: u16) -> Self {
+        Self {
+            group_index,
+            pages,
+            size,
+            desciptors: StringMap::default(),
+            materials: StringMap::default(),
+            cached_entries: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, id: MaterialId, material: MaterialDescriptor) {
+        self.desciptors.insert(id.0, material);
+    }
+
+    pub fn distribute_pages(&mut self) {
+        self.cached_entries.clear();
+        let mut page_i = 0;
+        self.desciptors.values().for_each(
+            |&MaterialDescriptor {
+                 diffuse_emissive,
+                 rsod,
+             }| {
+                match diffuse_emissive {
+                    Some(de) => {
+                        let entry = MaterialEntryDescriptor::DiffuseEmissive(de);
+                        self.cached_entries.insert(entry, page_i);
+                        page_i += 1;
+                    }
+                    _ => {}
+                }
+                match rsod {
+                    Some(rsod) => {
+                        let entry = MaterialEntryDescriptor::Rsod(rsod);
+                        self.cached_entries.insert(entry, page_i);
+                        page_i += 1;
+                    }
+                    _ => {}
+                }
+            },
+        );
+
+        assert!(
+            page_i < self.pages,
+            "the specified number of pages is insufficient to distribute all defined materials: {page_i}/{}",
+            self.pages
+        );
+
+        tracing::info!(
+            "Distributed unique material entries among group: used up {} total pages, {} free.",
+            page_i,
+            self.pages - page_i
+        );
+    }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialDescriptor {
-    /// RGB8 diffuse component (aka albedo)
-    pub diffuse: Option<MaterialComponentSource>,
-    /// RSO (roughness-specular-occlusion) entry
-    pub rso: Option<MaterialRsoDescriptor>,
+    /// diffuse + emissive entry
+    pub diffuse_emissive: Option<MaterialDiffuseEmissiveDescriptor>,
+    /// RSOD (roughness-specular-occlusion-displacement) entry
+    pub rsod: Option<MaterialRsodDescriptor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MaterialRsoDescriptor {
-    /// Pre-coalesced RSO where each channel represents roughness,
-    /// specular, and occlusion, respectively.
+pub enum MaterialEntryDescriptor {
+    DiffuseEmissive(MaterialDiffuseEmissiveDescriptor),
+    Rsod(MaterialRsodDescriptor),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaterialDiffuseEmissiveDescriptor {
+    /// Pre-coalesced `diffuse + emissive` where the first 3 channels (RGB)
+    /// represent the diffuse/albedo properties, and the last alpha channel
+    /// represents the emissive property.
     Coalesced(MaterialComponentSource),
-    /// Separate non-coalesced RSO where each sub-entry is a separate
+    /// Separate non-coalesced `diffuse + emissive` where the diffuse is an RGB
+    /// dffuse/albedo texture, and the emissive is a single-channel texture.
+    ///
+    /// This is coalesced into a single RGBA texture later.
+    Separate {
+        diffuse: Option<MaterialComponentSource>,
+        emissive: Option<MaterialComponentSource>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaterialRsodDescriptor {
+    /// Pre-coalesced RSOD where each channel represents roughness,
+    /// specular, occlusion, and displacement, respectively.
+    Coalesced(MaterialComponentSource),
+    /// Separate non-coalesced RSOD where each sub-entry is a separate
     /// single-channel texture.
     ///
-    /// This is coalesced into a single RGB texture later.
+    /// This is coalesced into a single RGBA texture later.
     Separate {
         roughness: Option<MaterialComponentSource>,
         specular: Option<MaterialComponentSource>,
         occlusion: Option<MaterialComponentSource>,
+        displacement: Option<MaterialComponentSource>,
     },
 }
 
