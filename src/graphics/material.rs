@@ -176,15 +176,15 @@ impl MaterialLocation {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct MaterialEntryLocation {
-    group_index: u32,
-    page: u32,
+    group_index: u16,
+    page: u16,
 }
 impl MaterialEntryLocation {
-    pub const fn group(&self) -> u32 {
+    pub const fn group(&self) -> u16 {
         self.group_index
     }
 
-    pub const fn page(&self) -> u32 {
+    pub const fn page(&self) -> u16 {
         self.page
     }
 }
