@@ -1,5 +1,5 @@
 use ethel::assets::{AssetId, RawTexture};
-use image::{EncodableLayout, RgbImage};
+use image::{EncodableLayout, RgbaImage};
 use janus::{
     StringHash, StringMap,
     texture::{ImageFormat, ImageType, Tex, Texture, TextureView},
@@ -7,14 +7,14 @@ use janus::{
 
 use crate::pipeline::SamplerObject;
 
-pub const MATERIAL_TEXTURE_FORMAT: ImageFormat = ImageFormat::Rgb;
+pub const MATERIAL_TEXTURE_FORMAT: ImageFormat = ImageFormat::Rgba;
 pub const MATERIAL_TEXTURE_PIXEL_TYPE: ImageType = ImageType::Bits8;
 
 #[derive(Clone, Debug)]
-pub struct ValidatedRawTexture(RgbImage);
+pub struct ValidatedRawTexture(RgbaImage);
 impl ValidatedRawTexture {
     pub fn from_texture(texture: RawTexture) -> Self {
-        Self(texture.0.to_rgb8())
+        Self(texture.0.to_rgba8())
     }
 
     pub fn width(&self) -> u32 {
@@ -98,7 +98,7 @@ impl<const GROUPS: usize> MaterialGroups<GROUPS> {
     #[cfg(feature = "pipeline")]
     pub fn as_samplers(&self) -> [SamplerObject; GROUPS] {
         use janus::texture::TextureKind;
-        let mut samplers = [SamplerObject::new(TextureView::null(TextureKind::Dim2D)); GROUPS];
+        let mut samplers = [SamplerObject::new(TextureView::null(TextureKind::Dim2DArray)); GROUPS];
         self.groups
             .iter()
             .enumerate()
@@ -139,25 +139,30 @@ impl Default for MaterialParams {
 /// Specifies the [`MaterialEntryLocation`] of a diffuse and RSO
 /// (roughness-specular-occlusion) entry as 2 distinct textures.
 ///
-/// The diffuse entry is a single RGB texture, RSO is also a single RGB
-/// texture formed from 3 distinct single-channel textures.
+/// The diffuse_and_emissive entry is a single RGBA texture, where RGB is the
+/// diffuse/albedo property of the texture, and the alpha component is the
+/// emissive property.
 ///
-/// This also contains the width and height of the texture as a `[0.0 - 1.0]`
-/// range, which is equal for both entries.
+/// RSOD is also a single RGBA texture, where each channel represents a
+/// different material property. These are, in order: roughness, specular,
+/// occlusion (as in, ambient occlusion), and displacement.
+///
+/// This also contains the width and height of the textures as a normalized
+/// `[0.0 - 1.0]` range, which is equal for both entries.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MaterialLocation {
-    diffuse_entry: MaterialEntryLocation,
-    rso_entry: MaterialEntryLocation,
+    diffuse_and_emissive: MaterialEntryLocation,
+    rsod_entry: MaterialEntryLocation,
     width: f32,
     height: f32,
 }
 impl MaterialLocation {
-    pub const fn diffuse(&self) -> MaterialEntryLocation {
-        self.diffuse_entry
+    pub const fn diffuse_and_emissive(&self) -> MaterialEntryLocation {
+        self.diffuse_and_emissive
     }
 
-    pub const fn rso(&self) -> MaterialEntryLocation {
-        self.rso_entry
+    pub const fn rsod(&self) -> MaterialEntryLocation {
+        self.rsod_entry
     }
 
     pub const fn width(&self) -> f32 {
