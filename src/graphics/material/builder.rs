@@ -59,7 +59,8 @@ impl MaterialGroupDescriptor {
                                 entry,
                                 MaterialEntryCache {
                                     assigned_page_index: page_i,
-                                    ..Default::default()
+                                    norm_sub_width: 0.1,
+                                    norm_sub_height: 0.1,
                                 },
                             );
                             page_i += 1;
@@ -158,12 +159,11 @@ impl MaterialGroupDescriptor {
                 .expect("texture is always array texture");
         }
 
-        let pixel_count = (self.size * self.size) as usize;
+        let pixel_count = self.size as usize * self.size as usize;
         let blank_rgba = vec![255u8; pixel_count * 4];
         let blank_rgb = vec![255u8; pixel_count * 3];
         let blank_sc = vec![255u8; pixel_count];
         let mut image_load_buffer = Vec::with_capacity(pixel_count * 4);
-        let mut page_index = 1;
 
         self.cached_entries
             .iter_mut()
@@ -176,8 +176,12 @@ impl MaterialGroupDescriptor {
                         let image = rgba.load(texture_registry).0;
                         let img_w = image.width();
                         let img_h = image.height();
+
                         cache.norm_sub_width = img_w as f32 / size as f32;
                         cache.norm_sub_height = img_h as f32 / size as f32;
+                        let page_index = cache.assigned_page_index as i32;
+
+                        #[cfg(not(test))]
                         texture
                             .upload_layer(
                                 0,
@@ -189,14 +193,7 @@ impl MaterialGroupDescriptor {
                                 &image.into_bytes(),
                             )
                             .unwrap();
-                    } else {
-                        cache.norm_sub_width = 0.1;
-                        cache.norm_sub_height = 0.1;
-                        texture
-                            .upload_layer(0, 0, 0, page_index, size, size, &blank_rgba)
-                            .unwrap();
                     }
-                    page_index += 1;
                 }
                 MaterialEntryDescriptor::Rsod(MaterialRsodDescriptor::Separate {
                     roughness,
@@ -208,40 +205,60 @@ impl MaterialGroupDescriptor {
                     let specular = specular.map(|src| src.load(texture_registry));
                     let occlusion = occlusion.map(|src| src.load(texture_registry));
                     let displacement = displacement.map(|src| src.load(texture_registry));
+
+                    let (known_len, width, height) = if let Some(r) = &roughness {
+                        let w = r.0.width();
+                        let h = r.0.height();
+                        ((w * h) as usize, w, h)
+                    } else if let Some(s) = &specular {
+                        let w = s.0.width();
+                        let h = s.0.height();
+                        ((w * h) as usize, w, h)
+                    } else if let Some(o) = &occlusion {
+                        let w = o.0.width();
+                        let h = o.0.height();
+                        ((w * h) as usize, w, h)
+                    } else if let Some(d) = &displacement {
+                        let w = d.0.width();
+                        let h = d.0.height();
+                        ((w * h) as usize, w, h)
+                    } else {
+                        let s = size as u32;
+                        ((s * s) as usize, s, s)
+                    };
+
                     let r = roughness
                         .as_ref()
-                        .map_or(blank_sc.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
                     let s = specular
                         .as_ref()
-                        .map_or(blank_sc.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
                     let o = occlusion
                         .as_ref()
-                        .map_or(blank_sc.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
                     let d = displacement
                         .as_ref()
-                        .map_or(blank_sc.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
                     coalesce_image_4a(r, s, o, d, &mut image_load_buffer);
 
-                    let image = image::load_from_memory(&image_load_buffer)
-                        .unwrap()
-                        .into_rgba8();
-                    let img_w = image.width();
-                    let img_h = image.height();
-                    cache.norm_sub_width = img_w as f32 / size as f32;
-                    cache.norm_sub_height = img_h as f32 / size as f32;
+                    cache.norm_sub_width = width as f32 / size as f32;
+                    cache.norm_sub_height = height as f32 / size as f32;
+                    let page_index = cache.assigned_page_index as i32;
+
+                    #[cfg(not(test))]
                     texture
                         .upload_layer(
                             0,
                             0,
                             0,
                             page_index,
-                            img_w as i32,
-                            img_h as i32,
+                            width as i32,
+                            height as i32,
                             &image_load_buffer,
                         )
                         .unwrap();
+
                     image_load_buffer.clear();
-                    page_index += 1;
                 }
 
                 MaterialEntryDescriptor::DiffuseEmissive(
@@ -249,34 +266,46 @@ impl MaterialGroupDescriptor {
                 ) => {
                     let diffuse = diffuse.map(|src| src.load(texture_registry));
                     let emissive = emissive.map(|src| src.load(texture_registry));
+
+                    let (known_len, width, height) = if let Some(d) = &diffuse {
+                        let w = d.0.width();
+                        let h = d.0.height();
+                        ((w * h) as usize, w, h)
+                    } else if let Some(e) = &emissive {
+                        let w = e.0.width();
+                        let h = e.0.height();
+                        ((w * h) as usize, w, h)
+                    } else {
+                        let s = size as u32;
+                        ((s * s) as usize, s, s)
+                    };
+
                     let d = diffuse
                         .as_ref()
-                        .map_or(blank_rgb.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_rgb[..known_len * 3], |src| src.0.as_bytes());
                     let e = emissive
                         .as_ref()
-                        .map_or(blank_sc.as_slice(), |src| src.0.as_bytes());
+                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
                     coalesce_image_rgb_a(d, e, &mut image_load_buffer);
 
-                    let image = image::load_from_memory(&image_load_buffer)
-                        .unwrap()
-                        .into_rgba8();
-                    let img_w = image.width();
-                    let img_h = image.height();
-                    cache.norm_sub_width = img_w as f32 / size as f32;
-                    cache.norm_sub_height = img_h as f32 / size as f32;
+                    cache.norm_sub_width = width as f32 / size as f32;
+                    cache.norm_sub_height = height as f32 / size as f32;
+                    let page_index = cache.assigned_page_index as i32;
+
+                    #[cfg(not(test))]
                     texture
                         .upload_layer(
                             0,
                             0,
                             0,
                             page_index,
-                            img_w as i32,
-                            img_h as i32,
+                            width as i32,
+                            height as i32,
                             &image_load_buffer,
                         )
                         .unwrap();
+
                     image_load_buffer.clear();
-                    page_index += 1;
                 }
             });
 
