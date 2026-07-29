@@ -54,28 +54,32 @@ impl MaterialGroupDescriptor {
                 match diffuse_emissive {
                     Some(de) => {
                         let entry = MaterialEntryDescriptor::DiffuseEmissive(de);
-                        self.cached_entries.insert(
-                            entry,
-                            MaterialEntryCache {
-                                assigned_page_index: page_i,
-                                ..Default::default()
-                            },
-                        );
-                        page_i += 1;
+                        if !self.cached_entries.contains_key(&entry) {
+                            self.cached_entries.insert(
+                                entry,
+                                MaterialEntryCache {
+                                    assigned_page_index: page_i,
+                                    ..Default::default()
+                                },
+                            );
+                            page_i += 1;
+                        }
                     }
                     _ => {}
                 }
                 match rsod {
                     Some(rsod) => {
                         let entry = MaterialEntryDescriptor::Rsod(rsod);
-                        self.cached_entries.insert(
-                            entry,
-                            MaterialEntryCache {
-                                assigned_page_index: page_i,
-                                ..Default::default()
-                            },
-                        );
-                        page_i += 1;
+                        if !self.cached_entries.contains_key(&entry) {
+                            self.cached_entries.insert(
+                                entry,
+                                MaterialEntryCache {
+                                    assigned_page_index: page_i,
+                                    ..Default::default()
+                                },
+                            );
+                            page_i += 1;
+                        }
                     }
                     _ => {}
                 }
