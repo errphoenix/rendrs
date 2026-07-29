@@ -11,9 +11,8 @@ use crate::graphics::material::{
     MaterialEntryLocation, MaterialGroup, MaterialId, MaterialLocation, MaterialLocationRegistry,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MaterialGroupDescriptor {
-    pub group_index: u16,
     pub pages: u16,
     pub size: u16,
 
@@ -29,9 +28,8 @@ pub struct MaterialGroupDescriptor {
     pub cached_entries: HashMap<MaterialEntryDescriptor, MaterialEntryCache>,
 }
 impl MaterialGroupDescriptor {
-    pub fn new(group_index: u16, pages: u16, size: u16) -> Self {
+    pub fn new(pages: u16, size: u16) -> Self {
         Self {
-            group_index,
             pages,
             size,
             desciptors: StringMap::default(),
@@ -97,11 +95,11 @@ impl MaterialGroupDescriptor {
         );
     }
 
-    pub fn process_locations(&mut self) {
+    pub fn process_locations(&mut self, group_index: u16) {
         self.materials.clear();
 
         let default_entry_loc = MaterialEntryLocation {
-            group_index: self.group_index,
+            group_index,
             page: 0,
         };
 
@@ -135,6 +133,8 @@ impl MaterialGroupDescriptor {
         texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
         material_registry: &mut MaterialLocationRegistry,
     ) -> MaterialGroup {
+        janus::assert_gl!();
+
         let size = self.size as i32;
         let texture = Texture::new_array(
             size,

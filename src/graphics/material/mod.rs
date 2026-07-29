@@ -203,7 +203,7 @@ impl MaterialEntryLocation {
 /// String-hashed material ID.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MaterialId(StringHash);
+pub struct MaterialId(pub StringHash);
 
 #[derive(Debug, Default, Clone)]
 pub struct MaterialLocationRegistry {
@@ -229,50 +229,184 @@ impl MaterialLocationRegistry {
     }
 }
 
-///
-/// group NAME {
-///     // group descriptor
-///     pages: num;
-///     size: num;
-///
-///     entry(id: str) { // material entry descriptor
-///         // rgb diffuse/albedo
-///         diffuse(path str OR assetid value);
-///         // single-channel optional emissive
-///         emissive(path str OR assetid value);
-///
-///         // RSOD
-///         // each is single-channel, coalesce into rgb8
-///         roughness(path str OR assetid value);
-///         specular(path str OR assetid value);
-///         occlusion(path str OR assetid value);
-///         displacement(path str OR assetid value);
-///         // OR
-///         // optional pre-coalesced rsod
-///         rsod(path str OR assetid value);
-///
-///         // diffuse, emissive, and RSOD are optional, if absent they
-///         // must default to a 1x1 blank pixel texture.
-///     };
-/// };
-///
+crate::material_groups! {
+    group Low {
+        pages: 128;
+        size: 512;
 
-#[macro_export]
-macro_rules! material_groups_internal {
-    (@group $pages:expr, $size:expr; $($entries:tt)*) => {
-        todo!()
-    };
-
-    (@entry $id: expr, $($comp:tt)*; $($other_entries:tt)*) => {
-
-        $crate::material_groups_internal!(@entry $($other_entries)*);
-    };
-    (@entry) => {};
+        entry("test") {
+            diffuse = path "some/path";
+        };
+    }
 }
 
 #[macro_export]
 macro_rules! material_groups {
-    ($(group { $g:tt };)*) => {
-        todo!()
+    (
+        $(
+            group $g_name:ident {
+                pages: $g_pages:expr;
+                size: $g_size:expr;
+
+                $($g_body:tt)*
+            }
+        )*
+    ) => {
+        const INTERNAL_GROUP_COUNT: usize = $crate::material_groups_internal!(
+            @enumerate $($g_name)*
+        );
+
+        $crate::material_groups_internal!(
+            @enumerate_groups
+            INTERNAL_GROUP_COUNT;
+            $(group $g_name)*
+        );
+
+        $(
+            paste::paste! {
+                pub fn [< material_group_ $g_name:lower _builder >](
+                ) -> $crate::graphics::material::builder::MaterialGroupDescriptor {
+                    $crate::material_groups_internal! {
+                        @group $g_pages, $g_size;
+                        $($g_body)*
+                    }
+                }
+            }
+        )*
+
+        // $(
+        //     paste::paste! {
+        //         #[allow(unused)]
+        //         pub fn [< material_group_ $g_name:lower _builders >] (
+        //         ) -> [$crate::graphics::material::builder::MaterialGroupDescriptor; INTERNAL_GROUP_COUNT] {
+        //             let mut array = [std::default::Default::default(); INTERNAL_GROUP_COUNT];
+        //             let mut i = 0;
+        //             $(
+        //                 array[i] = $crate::material_groups_internal! {
+        //                     @group $g_pages, $g_size;
+        //                     $($g_body)*
+        //                 };
+        //                 i += 1;
+        //             )*
+        //             array
+        //         }
+        //     }
+        // )*
+
+        // pub fn paste::paste!([< material_group_ $g_name:lowercase >])(
+        // ) -> [$crate::graphics::material::MaterialGroup; INTERNAL_GROUP_COUNT] {
+        //     paste::paste!([< material_group_ $g_name:lowercase _builders>])();
+        // }
+    };
+}
+
+#[macro_export]
+macro_rules! material_groups_internal {
+    (@enumerate $g_name:ident $($tail:tt)* ) => {
+        1 + $crate::material_groups_internal!(@enumerate $($tail)*)
+    };
+    (@enumerate ) => { 0 };
+
+    (@enumerate_groups $n:expr;) => {};
+    (@enumerate_groups $n:expr;
+        group $g_name:ident
+        $($other_groups:tt)*
+    ) => {
+        paste::paste! {
+            pub const [< MATERIAL_GROUP_INDEX_ $g_name:upper >]: usize =
+                $n - $crate::material_groups_internal!(@enumerate $($other_groups)*) - 1;
+            $crate::material_groups_internal!(
+                @enumerate_groups $n;
+                $($other_groups)*
+            );
+        }
+    };
+
+    (@group
+        $pages:expr, $size:expr;
+        $(
+            entry($entry_id:expr) {
+                $($entry_body:tt)*
+            };
+        )*
+    ) => {
+        let mut gd = $crate::graphics::material::builder::MaterialGroupDescriptor::new(
+            $pages, $size
+        );
+        $(
+            let id_raw = janus::hash_string($entry_id);
+            let id = $crate::graphics::material::MaterialId(id_raw);
+            let group = $crate::material_groups_internal!(@entry_body $($entry_body)*);
+            gd.add(id, group);
+        )*
+        gd
+    };
+
+    (@entry
+        entry($id:expr) {
+            $comp:tt
+        };
+    ) => {
+        $crate::material_groups_internal!(@entry_body $id, $comp)
+    };
+
+    (@entry_body
+        $( diffuse = $d_loc:tt;           )?
+        $( emissive = $e_loc:tt;          )?
+        $( diffuse_emissive = $de_loc:tt; )? // overrides
+
+        $( roughness = $r_loc:tt;         )?
+        $( specular = $s_loc:tt;          )?
+        $( occlusion = $o_loc:tt;         )?
+        $( displacement = $rsod_d_loc:tt; )?
+        $( rsod = $rsod_loc:tt;           )? // overrides
+    ) => {
+        // DIFFUSE + EMISSIVE
+        let d_source = None;
+        let e_source = None;
+        $(let d_source = Some($crate::material_groups_internal!(@component_src $d_loc));)?
+        $(let e_source = Some($crate::material_groups_internal!(@component_src $e_loc));)?
+        let de_desc = $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Separate {
+            diffuse: d_source,
+            emissive: e_source,
+        };
+        $( // overrides separate
+            let de_source = $crate::material_groups_internal!(@component_src $de_loc);
+            let de_desc = $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Coalesced(de_source);
+        )?
+
+        // RSOD
+        let r_source = None;
+        let s_source = None;
+        let o_source = None;
+        let d_source = None;
+        $(let r_source = Some($crate::material_groups_internal!(@component_src $r_loc));)?
+        $(let s_source = Some($crate::material_groups_internal!(@component_src $s_loc));)?
+        $(let o_source = Some($crate::material_groups_internal!(@component_src $o_loc));)?
+        $(let d_source = Some($crate::material_groups_internal!(@component_src $rsod_d_loc));)?
+        let rsod_desc = $crate::graphics::material::builder::MaterialRsodDescriptor::Separate {
+            roughness: r_source,
+            specular: s_source,
+            occlusion: o_source,
+            displacement: d_source,
+        };
+        $( // overrides separate
+            let rsod_source = $crate::material_groups_internal!(@component_src $rsod_loc);
+            let rsod_desc = $crate::graphics::material::builder::MaterialRsodDescriptor::Coalesced(rsod_source);
+        )?;
+
+        let de_entry = $crate::graphics::material::builder::MaterialEntryDescriptor::DiffuseEmissive(de_desc);
+        let rsod_entry = $crate::graphics::material::builder::MaterialEntryDescriptor::Rsod(rsod_desc);
+        $crate::graphics::material::builder::MaterialDescriptor {
+            diffuse_emissive: Some(de_entry),
+            rsod: Some(rsod_entry),
+        }
+    };
+
+    (@component_src path $path:expr) => {
+        $crate::graphics::material::builder::MaterialComponentSource::Path($path)
+    };
+    (@component_src asset $asset:expr) => {
+        $crate::graphics::material::builder::MaterialComponentSource::Asset($asset)
     };
 }
