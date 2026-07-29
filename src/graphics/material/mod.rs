@@ -229,17 +229,6 @@ impl MaterialLocationRegistry {
     }
 }
 
-crate::material_groups! {
-    group Low {
-        pages: 128;
-        size: 512;
-
-        entry("test") {
-            diffuse = path "some/path";
-        };
-    }
-}
-
 #[macro_export]
 macro_rules! material_groups {
     (
@@ -272,31 +261,23 @@ macro_rules! material_groups {
                     }
                 }
             }
+
+            paste::paste! {
+                pub fn [< material_group_ $g_name:lower >](
+                    group_index: u16,
+                    texture_registry: &mut ethel::assets::AssetRegistry<
+                        ethel::assets::RawTexture,
+                        ethel::assets::TextureMetadata
+                    >,
+                    material_registry: &mut MaterialLocationRegistry,
+                ) -> $crate::graphics::material::MaterialGroup {
+                    let mut builder = [< material_group_ $g_name:lower _builder >]();
+                    builder.distribute_pages();
+                    builder.process_locations(group_index);
+                    builder.build(texture_registry, material_registry)
+                }
+            }
         )*
-
-        // $(
-        //     paste::paste! {
-        //         #[allow(unused)]
-        //         pub fn [< material_group_ $g_name:lower _builders >] (
-        //         ) -> [$crate::graphics::material::builder::MaterialGroupDescriptor; INTERNAL_GROUP_COUNT] {
-        //             let mut array = [std::default::Default::default(); INTERNAL_GROUP_COUNT];
-        //             let mut i = 0;
-        //             $(
-        //                 array[i] = $crate::material_groups_internal! {
-        //                     @group $g_pages, $g_size;
-        //                     $($g_body)*
-        //                 };
-        //                 i += 1;
-        //             )*
-        //             array
-        //         }
-        //     }
-        // )*
-
-        // pub fn paste::paste!([< material_group_ $g_name:lowercase >])(
-        // ) -> [$crate::graphics::material::MaterialGroup; INTERNAL_GROUP_COUNT] {
-        //     paste::paste!([< material_group_ $g_name:lowercase _builders>])();
-        // }
     };
 }
 
@@ -344,69 +325,72 @@ macro_rules! material_groups_internal {
 
     (@entry
         entry($id:expr) {
-            $comp:tt
+            $($comp:tt)*
         };
     ) => {
         $crate::material_groups_internal!(@entry_body $id, $comp)
     };
 
     (@entry_body
-        $( diffuse = $d_loc:tt;           )?
-        $( emissive = $e_loc:tt;          )?
-        $( diffuse_emissive = $de_loc:tt; )? // overrides
+        $( $comp_type:ident = $loc_kind:ident( $loc_value:expr ); )*
+    ) => {{
+        #[allow(unused)]
+        // default blank sources
+        let mut d_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut e_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut de_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut r_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut s_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut o_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut di_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut rsod_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
 
-        $( roughness = $r_loc:tt;         )?
-        $( specular = $s_loc:tt;          )?
-        $( occlusion = $o_loc:tt;         )?
-        $( displacement = $rsod_d_loc:tt; )?
-        $( rsod = $rsod_loc:tt;           )? // overrides
-    ) => {
-        // DIFFUSE + EMISSIVE
-        let d_source = None;
-        let e_source = None;
-        $(let d_source = Some($crate::material_groups_internal!(@component_src $d_loc));)?
-        $(let e_source = Some($crate::material_groups_internal!(@component_src $e_loc));)?
-        let de_desc = $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Separate {
-            diffuse: d_source,
-            emissive: e_source,
+        $(
+            match stringify!($comp_type) {
+                "diffuse" => {
+                    d_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value));
+                },
+                "emissive" => e_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "diffuse_emissive" | "de" | "diffuse_and_emissive" => de_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "roughness" => r_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "specular" => s_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "occlusion" => o_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "displacement" => di_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "rsod" | "lighting" => rsod_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                _ => {},
+            }
+        )*
+
+        let de_desc = if de_source.is_some() {
+            $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Coalesced(de_source)
+        } else {
+            $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Separate {
+                diffuse: d_source,
+                emissive: e_source,
+            }
         };
-        $( // overrides separate
-            let de_source = $crate::material_groups_internal!(@component_src $de_loc);
-            let de_desc = $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Coalesced(de_source);
-        )?
 
-        // RSOD
-        let r_source = None;
-        let s_source = None;
-        let o_source = None;
-        let d_source = None;
-        $(let r_source = Some($crate::material_groups_internal!(@component_src $r_loc));)?
-        $(let s_source = Some($crate::material_groups_internal!(@component_src $s_loc));)?
-        $(let o_source = Some($crate::material_groups_internal!(@component_src $o_loc));)?
-        $(let d_source = Some($crate::material_groups_internal!(@component_src $rsod_d_loc));)?
-        let rsod_desc = $crate::graphics::material::builder::MaterialRsodDescriptor::Separate {
-            roughness: r_source,
-            specular: s_source,
-            occlusion: o_source,
-            displacement: d_source,
+        let rsod_desc = if rsod_source.is_some() {
+            $crate::graphics::material::builder::MaterialRsodDescriptor::Coalesced(rsod_source)
+        } else {
+            $crate::graphics::material::builder::MaterialRsodDescriptor::Separate {
+                roughness: r_source,
+                specular: s_source,
+                occlusion: o_source,
+                displacement: di_source,
+            }
         };
-        $( // overrides separate
-            let rsod_source = $crate::material_groups_internal!(@component_src $rsod_loc);
-            let rsod_desc = $crate::graphics::material::builder::MaterialRsodDescriptor::Coalesced(rsod_source);
-        )?;
 
-        let de_entry = $crate::graphics::material::builder::MaterialEntryDescriptor::DiffuseEmissive(de_desc);
-        let rsod_entry = $crate::graphics::material::builder::MaterialEntryDescriptor::Rsod(rsod_desc);
         $crate::graphics::material::builder::MaterialDescriptor {
-            diffuse_emissive: Some(de_entry),
-            rsod: Some(rsod_entry),
+            diffuse_emissive: Some(de_desc),
+            rsod: Some(rsod_desc),
         }
-    };
+    }};
 
-    (@component_src path $path:expr) => {
+    ( @component_src path $path:expr ) => {
         $crate::graphics::material::builder::MaterialComponentSource::Path($path)
     };
-    (@component_src asset $asset:expr) => {
+    ( @component_src asset $asset:expr ) => {
         $crate::graphics::material::builder::MaterialComponentSource::Asset($asset)
     };
 }
