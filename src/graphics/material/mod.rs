@@ -400,7 +400,7 @@ impl MaterialGroupDescriptor {
     }
 
     pub fn build(
-        &mut self,
+        mut self,
         texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
         material_registry: &mut MaterialLocationRegistry,
     ) -> MaterialGroup {
@@ -515,6 +515,10 @@ impl MaterialGroupDescriptor {
             let location = self.materials.get_mut(&id).unwrap();
             location.width = width;
             location.height = height;
+        });
+
+        self.materials.drain().for_each(|(id, location)| {
+            material_registry.add(MaterialId(id), location);
         });
 
         MaterialGroup {
