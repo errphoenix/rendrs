@@ -240,9 +240,6 @@ impl MaterialLocationRegistry {
 ///         diffuse(path str OR assetid value);
 ///         // single-channel optional emissive
 ///         emissive(path str OR assetid value);
-///         // OR
-///         // optional pre-coalesced diffuse + albedo
-///         diffuse_emissive(path str OR assetid value);
 ///
 ///         // RSOD
 ///         // each is single-channel, coalesce into rgb8

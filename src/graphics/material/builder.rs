@@ -157,9 +157,11 @@ impl MaterialGroupDescriptor {
 
         let mut image_load_buffer = Vec::new();
         let pixel_count = (self.size * self.size) as usize;
+        let blank_rgba = vec![255u8; pixel_count * 4];
         let blank_rgb = vec![255u8; pixel_count * 3];
         let blank_sc = vec![255u8; pixel_count];
 
+        // TODO LOAD TEXTURES GL
         self.cached_entries
             .iter_mut()
             .for_each(|(entry, cache)| match entry {
@@ -167,8 +169,19 @@ impl MaterialGroupDescriptor {
                 | MaterialEntryDescriptor::DiffuseEmissive(
                     MaterialDiffuseEmissiveDescriptor::Coalesced(rgba),
                 ) => {
-                    let data = rgba.load(texture_registry);
-                    image_load_buffer.extend_from_slice(data.0.as_bytes());
+                    if let Some(rgba) = rgba {
+                        let image = rgba.load(texture_registry).0;
+                        let img_w = image.width();
+                        let img_h = image.height();
+                        cache.norm_sub_width = img_w as f32 / size as f32;
+                        cache.norm_sub_height = img_h as f32 / size as f32;
+                        cache.image = Some(ValidatedRawTexture(image.into_rgba8()));
+                    } else {
+                        let image = image::load_from_memory(&blank_rgba).unwrap();
+                        cache.norm_sub_width = 0.1;
+                        cache.norm_sub_height = 0.1;
+                        cache.image = Some(ValidatedRawTexture(image.into_rgba8()));
+                    }
                 }
                 MaterialEntryDescriptor::Rsod(MaterialRsodDescriptor::Separate {
                     roughness,
@@ -288,7 +301,7 @@ pub enum MaterialDiffuseEmissiveDescriptor {
     /// Pre-coalesced `diffuse + emissive` where the first 3 channels (RGB)
     /// represent the diffuse/albedo properties, and the last alpha channel
     /// represents the emissive property.
-    Coalesced(MaterialComponentSource),
+    Coalesced(Option<MaterialComponentSource>),
     /// Separate non-coalesced `diffuse + emissive` where the diffuse is an RGB
     /// dffuse/albedo texture, and the emissive is a single-channel texture.
     ///
@@ -303,7 +316,7 @@ pub enum MaterialDiffuseEmissiveDescriptor {
 pub enum MaterialRsodDescriptor {
     /// Pre-coalesced RSOD where each channel represents roughness,
     /// specular, occlusion, and displacement, respectively.
-    Coalesced(MaterialComponentSource),
+    Coalesced(Option<MaterialComponentSource>),
     /// Separate non-coalesced RSOD where each sub-entry is a separate
     /// single-channel texture.
     ///
