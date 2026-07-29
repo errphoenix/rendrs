@@ -138,9 +138,11 @@ impl MaterialGroupDescriptor {
         texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
         material_registry: &mut MaterialLocationRegistry,
     ) -> MaterialGroup {
+        #[cfg(not(test))]
         janus::assert_gl!();
 
         let size = self.size as i32;
+        #[cfg(not(test))]
         let texture = Texture::new_array(
             size,
             size,
@@ -151,6 +153,7 @@ impl MaterialGroupDescriptor {
         );
 
         // load default blank texture at page 0
+        #[cfg(not(test))]
         {
             let size = self.size as u32;
             let blank_image = image::RgbaImage::from_pixel(size, size, image::Rgba([255u8; 4]));
@@ -333,6 +336,7 @@ impl MaterialGroupDescriptor {
         });
 
         MaterialGroup {
+            #[cfg(not(test))]
             array_texture_object: texture,
             size: self.size,
             pages: self.pages,

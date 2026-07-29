@@ -39,6 +39,7 @@ impl From<RawTexture> for ValidatedRawTexture {
 
 #[derive(Debug)]
 pub struct MaterialGroup {
+    #[cfg(not(test))]
     array_texture_object: Texture,
     size: u16,
     pages: u16,
@@ -52,15 +53,18 @@ impl MaterialGroup {
         self.size
     }
 
+    #[cfg(not(test))]
     pub const fn array_texture_object(&self) -> TextureView {
         self.array_texture_object.view()
     }
 
+    #[cfg(not(test))]
     #[cfg(feature = "pipeline")]
     pub fn sampler(&self) -> SamplerObject {
         SamplerObject::new(&self.array_texture_object)
     }
 
+    #[cfg(not(test))]
     pub fn copy_to_page(&self, texture: impl Into<ValidatedRawTexture>, page_target: u16) {
         let texture = texture.into();
         let bytes = texture.bytes();
@@ -97,6 +101,7 @@ impl<const GROUPS: usize> MaterialGroups<GROUPS> {
         &self.groups[index]
     }
 
+    #[cfg(not(test))]
     #[cfg(feature = "pipeline")]
     pub fn as_samplers(&self) -> [SamplerObject; GROUPS] {
         use janus::texture::TextureKind;
@@ -393,4 +398,181 @@ macro_rules! material_groups_internal {
     ( @component_src asset $asset:expr ) => {
         $crate::graphics::material::builder::MaterialComponentSource::Asset($asset)
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use ethel::assets::{AssetId, AssetRegistry, TextureMetadata};
+
+    use super::builder::*;
+    use super::*;
+
+    #[test]
+    fn material_group_composition() {
+        const TEST_PAGES: u16 = 128;
+        const TEST_SIZE: u16 = 256;
+
+        let mut asset_registry = AssetRegistry::<RawTexture, TextureMetadata>::new();
+
+        const SOURCE_DIFFUSE_0: &'static str = "test_64px_rgb.jpg";
+        const SOURCE_EMISSIVE_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_DIFFUSE_AND_EMISSIVE_0: &'static str = "test_64px_rgba.png";
+        const SOURCE_ROUGHNESS_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_SPECULAR_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_OCCLUSION_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_DISPLACEMENT_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_RSOD_0: &'static str = "test_64px_rgba.png";
+        ethel::hashet!(
+            const SOURCE_DIFFUSE_1 = "diffuse_1.src";
+            const SOURCE_EMISSIVE_1 = "emissive_1.src";
+            const SOURCE_DIFFUSE_AND_EMISSIVE_1 = "diffuse_and_emissive_1.src";
+            const SOURCE_ROUGHNESS_1 = "roughness_1.src";
+            const SOURCE_SPECULAR_1 = "specular_1.src";
+            const SOURCE_OCCLUSION_1 = "occlusion_1.src";
+            const SOURCE_DISPLACEMENT_1 = "displacement_1.src";
+            const SOURCE_RSOD_1 = "rsod_1.src";
+
+            const MATERIAL_A = "test_material_a";
+            const MATERIAL_B = "test_material_b";
+            const MATERIAL_C = "test_material_c";
+            const MATERIAL_D = "test_material_d";
+        );
+
+        let mut process_asset = |id: AssetId, channels: u32| {
+            let path = match channels {
+                1 => "test_64px_gray.jpg",
+                3 => "test_64px_rgb.jpg",
+                4 => "test_64px_rgba.png",
+                _ => unreachable!(),
+            };
+            asset_registry.register(id, path);
+            asset_registry
+                .get_mut(id)
+                .unwrap()
+                .load_to_memory(&())
+                .unwrap();
+        };
+        {
+            process_asset(*SOURCE_DIFFUSE_1, 3);
+            process_asset(*SOURCE_EMISSIVE_1, 1);
+            process_asset(*SOURCE_DIFFUSE_AND_EMISSIVE_1, 4);
+            process_asset(*SOURCE_ROUGHNESS_1, 1);
+            process_asset(*SOURCE_SPECULAR_1, 1);
+            process_asset(*SOURCE_OCCLUSION_1, 1);
+            process_asset(*SOURCE_DISPLACEMENT_1, 1);
+            process_asset(*SOURCE_RSOD_1, 4);
+        }
+
+        let mat_a_diffuse = MaterialComponentSource::Path(SOURCE_DIFFUSE_0);
+        let mat_a_emissive = MaterialComponentSource::Path(SOURCE_EMISSIVE_0);
+        let mat_a_roughness = MaterialComponentSource::Asset(*SOURCE_ROUGHNESS_1);
+        let mat_a_specular = MaterialComponentSource::Asset(*SOURCE_SPECULAR_1);
+        let mat_a_occlusion = MaterialComponentSource::Asset(*SOURCE_OCCLUSION_1);
+        let mat_a_displacement = MaterialComponentSource::Path(SOURCE_DISPLACEMENT_0);
+
+        let mat_b_diffuse_and_emissive =
+            MaterialComponentSource::Asset(*SOURCE_DIFFUSE_AND_EMISSIVE_1);
+        let mat_b_roughness = MaterialComponentSource::Asset(*SOURCE_ROUGHNESS_1);
+        let mat_b_specular = MaterialComponentSource::Asset(*SOURCE_SPECULAR_1);
+
+        let mat_c_diffuse = MaterialComponentSource::Asset(*SOURCE_DIFFUSE_1);
+        let mat_c_emissive = MaterialComponentSource::Asset(*SOURCE_EMISSIVE_1);
+        let mat_c_rsod = MaterialComponentSource::Asset(*SOURCE_RSOD_1);
+
+        let mat_d_diffuse = MaterialComponentSource::Asset(*SOURCE_DIFFUSE_1);
+        let mat_d_emissive = MaterialComponentSource::Asset(*SOURCE_EMISSIVE_1);
+        let mat_d_rsod = MaterialComponentSource::Asset(*SOURCE_RSOD_1);
+
+        let mut group = MaterialGroupDescriptor::new(TEST_PAGES, TEST_SIZE);
+        group.add(
+            MaterialId(MATERIAL_A.hash().inner()),
+            MaterialDescriptor {
+                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                    diffuse: Some(mat_a_diffuse),
+                    emissive: Some(mat_a_emissive),
+                }),
+                rsod: Some(MaterialRsodDescriptor::Separate {
+                    roughness: Some(mat_a_roughness),
+                    specular: Some(mat_a_specular),
+                    occlusion: Some(mat_a_occlusion),
+                    displacement: Some(mat_a_displacement),
+                }),
+            },
+        );
+        group.add(
+            MaterialId(MATERIAL_B.hash().inner()),
+            MaterialDescriptor {
+                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Coalesced(Some(
+                    mat_b_diffuse_and_emissive,
+                ))),
+                rsod: Some(MaterialRsodDescriptor::Separate {
+                    roughness: Some(mat_b_roughness),
+                    specular: Some(mat_b_specular),
+                    occlusion: None,
+                    displacement: None,
+                }),
+            },
+        );
+        group.add(
+            MaterialId(MATERIAL_C.hash().inner()),
+            MaterialDescriptor {
+                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                    diffuse: Some(mat_c_diffuse),
+                    emissive: Some(mat_c_emissive),
+                }),
+                rsod: Some(MaterialRsodDescriptor::Coalesced(Some(mat_c_rsod))),
+            },
+        );
+        group.add(
+            MaterialId(MATERIAL_D.hash().inner()),
+            MaterialDescriptor {
+                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                    diffuse: Some(mat_d_diffuse),
+                    emissive: Some(mat_d_emissive),
+                }),
+                rsod: Some(MaterialRsodDescriptor::Coalesced(Some(mat_d_rsod))),
+            },
+        );
+
+        let mut mat_registry = MaterialLocationRegistry::new();
+
+        group.distribute_pages();
+        group.process_locations(0);
+
+        {
+            let mut out = std::io::stdout().lock();
+            group
+                .cached_entries
+                .iter()
+                .enumerate()
+                .for_each(|(i, (entry, cache))| {
+                    writeln!(&mut out, "#{i}: {entry:?} => {cache:?}").unwrap();
+                });
+            out.flush().unwrap();
+        }
+
+        group.build(&mut asset_registry, &mut mat_registry);
+
+        let mat_a = mat_registry
+            .get(&MaterialId(MATERIAL_A.hash().inner()))
+            .unwrap();
+        let mat_b = mat_registry
+            .get(&MaterialId(MATERIAL_B.hash().inner()))
+            .unwrap();
+        let mat_c = mat_registry
+            .get(&MaterialId(MATERIAL_C.hash().inner()))
+            .unwrap();
+        let mat_d = mat_registry
+            .get(&MaterialId(MATERIAL_D.hash().inner()))
+            .unwrap();
+
+        assert!(mat_a.width > 0.0 && mat_a.height > 0.0);
+        assert!(mat_b.width > 0.0 && mat_b.height > 0.0);
+        assert!(mat_c.width > 0.0 && mat_c.height > 0.0);
+        assert!(mat_d.width > 0.0 && mat_d.height > 0.0);
+
+        assert_eq!(mat_c.rsod_entry, mat_d.rsod_entry);
+    }
 }
