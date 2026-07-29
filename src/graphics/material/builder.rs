@@ -9,7 +9,6 @@ use janus::{
 
 use crate::graphics::material::{
     MaterialEntryLocation, MaterialGroup, MaterialId, MaterialLocation, MaterialLocationRegistry,
-    ValidatedRawTexture,
 };
 
 #[derive(Clone, Debug)]
@@ -155,13 +154,13 @@ impl MaterialGroupDescriptor {
                 .expect("texture is always array texture");
         }
 
-        let mut image_load_buffer = Vec::new();
         let pixel_count = (self.size * self.size) as usize;
         let blank_rgba = vec![255u8; pixel_count * 4];
         let blank_rgb = vec![255u8; pixel_count * 3];
         let blank_sc = vec![255u8; pixel_count];
+        let mut image_load_buffer = Vec::with_capacity(pixel_count * 4);
+        let mut page_index = 1;
 
-        // TODO LOAD TEXTURES GL
         self.cached_entries
             .iter_mut()
             .for_each(|(entry, cache)| match entry {
@@ -175,13 +174,25 @@ impl MaterialGroupDescriptor {
                         let img_h = image.height();
                         cache.norm_sub_width = img_w as f32 / size as f32;
                         cache.norm_sub_height = img_h as f32 / size as f32;
-                        cache.image = Some(ValidatedRawTexture(image.into_rgba8()));
+                        texture
+                            .upload_layer(
+                                0,
+                                0,
+                                0,
+                                page_index,
+                                img_w as i32,
+                                img_h as i32,
+                                &image.into_bytes(),
+                            )
+                            .unwrap();
                     } else {
-                        let image = image::load_from_memory(&blank_rgba).unwrap();
                         cache.norm_sub_width = 0.1;
                         cache.norm_sub_height = 0.1;
-                        cache.image = Some(ValidatedRawTexture(image.into_rgba8()));
+                        texture
+                            .upload_layer(0, 0, 0, page_index, size, size, &blank_rgba)
+                            .unwrap();
                     }
+                    page_index += 1;
                 }
                 MaterialEntryDescriptor::Rsod(MaterialRsodDescriptor::Separate {
                     roughness,
@@ -210,12 +221,23 @@ impl MaterialGroupDescriptor {
                     let image = image::load_from_memory(&image_load_buffer)
                         .unwrap()
                         .into_rgba8();
-                    image_load_buffer.clear();
                     let img_w = image.width();
                     let img_h = image.height();
                     cache.norm_sub_width = img_w as f32 / size as f32;
                     cache.norm_sub_height = img_h as f32 / size as f32;
-                    cache.image = Some(ValidatedRawTexture(image));
+                    texture
+                        .upload_layer(
+                            0,
+                            0,
+                            0,
+                            page_index,
+                            img_w as i32,
+                            img_h as i32,
+                            &image_load_buffer,
+                        )
+                        .unwrap();
+                    image_load_buffer.clear();
+                    page_index += 1;
                 }
 
                 MaterialEntryDescriptor::DiffuseEmissive(
@@ -234,12 +256,23 @@ impl MaterialGroupDescriptor {
                     let image = image::load_from_memory(&image_load_buffer)
                         .unwrap()
                         .into_rgba8();
-                    image_load_buffer.clear();
                     let img_w = image.width();
                     let img_h = image.height();
                     cache.norm_sub_width = img_w as f32 / size as f32;
                     cache.norm_sub_height = img_h as f32 / size as f32;
-                    cache.image = Some(ValidatedRawTexture(image));
+                    texture
+                        .upload_layer(
+                            0,
+                            0,
+                            0,
+                            page_index,
+                            img_w as i32,
+                            img_h as i32,
+                            &image_load_buffer,
+                        )
+                        .unwrap();
+                    image_load_buffer.clear();
+                    page_index += 1;
                 }
             });
 
@@ -290,7 +323,6 @@ pub enum MaterialEntryDescriptor {
 
 #[derive(Clone, Debug, Default)]
 pub struct MaterialEntryCache {
-    pub image: Option<ValidatedRawTexture>,
     pub norm_sub_width: f32,
     pub norm_sub_height: f32,
     pub assigned_page_index: u16,
