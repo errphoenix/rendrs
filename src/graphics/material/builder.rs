@@ -11,6 +11,17 @@ use crate::graphics::material::{
     MaterialEntryLocation, MaterialGroup, MaterialId, MaterialLocation, MaterialLocationRegistry,
 };
 
+/// Page indexing offset to ignore reserved first-N pages in material groups.
+///
+/// The 3 reserved faces are, in order:
+/// * Fallback for `diffuse + alpha`, full blank rgba.
+/// * Fallback for ORMD, a full black rgba image.
+/// * Fallback for `normal + emissive`, full blue rgb + `0` alpha.
+pub const PAGE_OFFSET_RESERVED: usize = 3;
+pub const PAGE_FALLBACK_DIFFUSE_ALPHA: usize = 0;
+pub const PAGE_FALLBACK_ORMD: usize = 1;
+pub const PAGE_FALLBACK_NORMAL_EMISSIVE: usize = 2;
+
 #[derive(Clone, Debug, Default)]
 pub struct MaterialGroupDescriptor {
     pub pages: u16,
@@ -29,6 +40,7 @@ pub struct MaterialGroupDescriptor {
 }
 impl MaterialGroupDescriptor {
     pub fn new(pages: u16, size: u16) -> Self {
+        assert!(pages > PAGE_OFFSET_RESERVED as u16);
         Self {
             pages,
             size,
@@ -44,16 +56,17 @@ impl MaterialGroupDescriptor {
 
     pub fn distribute_pages(&mut self) {
         self.cached_entries.clear();
-        // page 0 is reserved for default
-        let mut page_i = 1;
+        // page 0,1,2 are reserved for fallback
+        let mut page_i = 3;
         self.desciptors.values().for_each(
             |&MaterialDescriptor {
-                 diffuse_emissive,
-                 rsod,
+                 diffuse_alpha,
+                 normal_emissive,
+                 ormd,
              }| {
-                match diffuse_emissive {
-                    Some(de) => {
-                        let entry = MaterialEntryDescriptor::DiffuseEmissive(de);
+                match diffuse_alpha {
+                    Some(da) => {
+                        let entry = MaterialEntryDescriptor::DiffuseAlpha(da);
                         if !self.cached_entries.contains_key(&entry) {
                             self.cached_entries.insert(
                                 entry,
@@ -68,9 +81,26 @@ impl MaterialGroupDescriptor {
                     }
                     _ => {}
                 }
-                match rsod {
-                    Some(rsod) => {
-                        let entry = MaterialEntryDescriptor::Rsod(rsod);
+                match normal_emissive {
+                    Some(ne) => {
+                        let entry = MaterialEntryDescriptor::NormalEmissive(ne);
+                        if !self.cached_entries.contains_key(&entry) {
+                            self.cached_entries.insert(
+                                entry,
+                                MaterialEntryCache {
+                                    assigned_page_index: page_i,
+                                    norm_sub_width: 0.1,
+                                    norm_sub_height: 0.1,
+                                },
+                            );
+                            page_i += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                match ormd {
+                    Some(ormd) => {
+                        let entry = MaterialEntryDescriptor::Ormd(ormd);
                         if !self.cached_entries.contains_key(&entry) {
                             self.cached_entries.insert(
                                 entry,
@@ -103,30 +133,45 @@ impl MaterialGroupDescriptor {
     pub fn process_locations(&mut self, group_index: u16) {
         self.materials.clear();
 
-        let default_entry_loc = MaterialEntryLocation {
+        let fallback_diffuse_alpha = MaterialEntryLocation {
+            page: PAGE_FALLBACK_DIFFUSE_ALPHA as u16,
             group_index,
-            page: 0,
+        };
+        let fallback_normal_emissive = MaterialEntryLocation {
+            page: PAGE_FALLBACK_NORMAL_EMISSIVE as u16,
+            group_index,
+        };
+        let fallback_ormd = MaterialEntryLocation {
+            page: PAGE_FALLBACK_ORMD as u16,
+            group_index,
         };
 
         self.desciptors.iter().for_each(|(&id, descriptor)| {
             let mut material_location = MaterialLocation {
-                diffuse_and_emissive: default_entry_loc,
-                rsod_entry: default_entry_loc,
+                diffuse_and_alpha: fallback_diffuse_alpha,
+                normal_and_emissive: fallback_normal_emissive,
+                ormd: fallback_ormd,
                 // initialized later
                 width: 0f32,
                 height: 0f32,
             };
 
-            if let Some(diffuse_emissive) = descriptor.diffuse_emissive {
-                let entry = MaterialEntryDescriptor::DiffuseEmissive(diffuse_emissive);
+            if let Some(diffuse_alpha) = descriptor.diffuse_alpha {
+                let entry = MaterialEntryDescriptor::DiffuseAlpha(diffuse_alpha);
                 if let Some(cache) = self.cached_entries.get(&entry) {
-                    material_location.diffuse_and_emissive.page = cache.assigned_page_index;
+                    material_location.diffuse_and_alpha.page = cache.assigned_page_index;
                 }
             }
-            if let Some(rsod) = descriptor.rsod {
-                let entry = MaterialEntryDescriptor::Rsod(rsod);
+            if let Some(normal_emissive) = descriptor.normal_emissive {
+                let entry = MaterialEntryDescriptor::NormalEmissive(normal_emissive);
                 if let Some(cache) = self.cached_entries.get(&entry) {
-                    material_location.rsod_entry.page = cache.assigned_page_index;
+                    material_location.normal_and_emissive.page = cache.assigned_page_index;
+                }
+            }
+            if let Some(ormd) = descriptor.ormd {
+                let entry = MaterialEntryDescriptor::Ormd(ormd);
+                if let Some(cache) = self.cached_entries.get(&entry) {
+                    material_location.ormd.page = cache.assigned_page_index;
                 }
             }
             self.materials.insert(id, material_location);
@@ -163,17 +208,29 @@ impl MaterialGroupDescriptor {
         }
 
         let pixel_count = self.size as usize * self.size as usize;
-        let blank_rgba = vec![255u8; pixel_count * 4];
-        let blank_rgb = vec![255u8; pixel_count * 3];
-        let blank_sc = vec![255u8; pixel_count];
+        let fallback_sc_white = vec![255u8; pixel_count];
+        let fallback_sc_black = vec![0u8; pixel_count];
+        let fallback_rgb_white = vec![255u8; pixel_count * 3];
+        let fallback_rgb_black = vec![0u8; pixel_count * 3];
+        let fallback_rgb_blue = {
+            let mut vec = Vec::with_capacity(pixel_count * 3);
+            for _ in 0..pixel_count {
+                vec.extend_from_slice(&[0u8, 0u8, 255u8]);
+            }
+            vec
+        };
+
         let mut image_load_buffer = Vec::with_capacity(pixel_count * 4);
 
         self.cached_entries
             .iter_mut()
             .for_each(|(entry, cache)| match entry {
-                MaterialEntryDescriptor::Rsod(MaterialRsodDescriptor::Coalesced(rgba))
-                | MaterialEntryDescriptor::DiffuseEmissive(
-                    MaterialDiffuseEmissiveDescriptor::Coalesced(rgba),
+                MaterialEntryDescriptor::Ormd(MaterialOrmdDescriptor::Coalesced(rgba))
+                | MaterialEntryDescriptor::DiffuseAlpha(
+                    MaterialDiffuseAlphaDescriptor::Coalesced(rgba),
+                )
+                | MaterialEntryDescriptor::NormalEmissive(
+                    MaterialNormalEmissiveDescriptor::Coalesced(rgba),
                 ) => {
                     if let Some(rgba) = rgba {
                         let image = rgba.load(texture_registry).0;
@@ -198,128 +255,101 @@ impl MaterialGroupDescriptor {
                             .unwrap();
                     }
                 }
-                MaterialEntryDescriptor::Rsod(MaterialRsodDescriptor::Separate {
-                    roughness,
-                    specular,
+                MaterialEntryDescriptor::Ormd(MaterialOrmdDescriptor::Separate {
                     occlusion,
+                    roughness,
+                    metallic,
                     displacement,
                 }) => {
-                    let roughness = roughness.map(|src| src.load(texture_registry));
-                    let specular = specular.map(|src| src.load(texture_registry));
-                    let occlusion = occlusion.map(|src| src.load(texture_registry));
-                    let displacement = displacement.map(|src| src.load(texture_registry));
-
-                    let (known_len, width, height) = if let Some(r) = &roughness {
-                        let w = r.0.width();
-                        let h = r.0.height();
-                        ((w * h) as usize, w, h)
-                    } else if let Some(s) = &specular {
-                        let w = s.0.width();
-                        let h = s.0.height();
-                        ((w * h) as usize, w, h)
-                    } else if let Some(o) = &occlusion {
-                        let w = o.0.width();
-                        let h = o.0.height();
-                        ((w * h) as usize, w, h)
-                    } else if let Some(d) = &displacement {
-                        let w = d.0.width();
-                        let h = d.0.height();
-                        ((w * h) as usize, w, h)
-                    } else {
-                        let s = size as u32;
-                        ((s * s) as usize, s, s)
-                    };
-
-                    let r = roughness
-                        .as_ref()
-                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
-                    let s = specular
-                        .as_ref()
-                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
-                    let o = occlusion
-                        .as_ref()
-                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
-                    let d = displacement
-                        .as_ref()
-                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
-                    coalesce_image_4a(r, s, o, d, &mut image_load_buffer);
-
-                    cache.norm_sub_width = width as f32 / size as f32;
-                    cache.norm_sub_height = height as f32 / size as f32;
-                    let page_index = cache.assigned_page_index as i32;
-
-                    #[cfg(not(test))]
-                    texture
-                        .upload_layer(
-                            0,
-                            0,
-                            0,
-                            page_index,
-                            width as i32,
-                            height as i32,
-                            &image_load_buffer,
-                        )
-                        .unwrap();
-
-                    image_load_buffer.clear();
+                    if occlusion.is_some()
+                        || roughness.is_some()
+                        || metallic.is_some()
+                        || displacement.is_some()
+                    {
+                        build_4a(
+                            #[cfg(not(test))]
+                            &texture,
+                            occlusion,
+                            roughness,
+                            metallic,
+                            displacement,
+                            cache,
+                            texture_registry,
+                            size as u32,
+                            &fallback_sc_black,
+                            &mut image_load_buffer,
+                        );
+                    }
                 }
-
-                MaterialEntryDescriptor::DiffuseEmissive(
-                    MaterialDiffuseEmissiveDescriptor::Separate { diffuse, emissive },
+                MaterialEntryDescriptor::Ormd(MaterialOrmdDescriptor::OrmAndDisplacement {
+                    orm,
+                    displacement,
+                }) => {
+                    if orm.is_some() || displacement.is_some() {
+                        build_rgb_a(
+                            #[cfg(not(test))]
+                            &texture,
+                            orm,
+                            displacement,
+                            cache,
+                            texture_registry,
+                            size as u32,
+                            &fallback_rgb_black,
+                            &fallback_sc_black,
+                            &mut image_load_buffer,
+                        );
+                    }
+                }
+                MaterialEntryDescriptor::NormalEmissive(
+                    MaterialNormalEmissiveDescriptor::Separate { normal, emissive },
                 ) => {
-                    let diffuse = diffuse.map(|src| src.load(texture_registry));
-                    let emissive = emissive.map(|src| src.load(texture_registry));
-
-                    let (known_len, width, height) = if let Some(d) = &diffuse {
-                        let w = d.0.width();
-                        let h = d.0.height();
-                        ((w * h) as usize, w, h)
-                    } else if let Some(e) = &emissive {
-                        let w = e.0.width();
-                        let h = e.0.height();
-                        ((w * h) as usize, w, h)
-                    } else {
-                        let s = size as u32;
-                        ((s * s) as usize, s, s)
-                    };
-
-                    let d = diffuse
-                        .as_ref()
-                        .map_or(&blank_rgb[..known_len * 3], |src| src.0.as_bytes());
-                    let e = emissive
-                        .as_ref()
-                        .map_or(&blank_sc[..known_len], |src| src.0.as_bytes());
-                    coalesce_image_rgb_a(d, e, &mut image_load_buffer);
-
-                    cache.norm_sub_width = width as f32 / size as f32;
-                    cache.norm_sub_height = height as f32 / size as f32;
-                    let page_index = cache.assigned_page_index as i32;
-
-                    #[cfg(not(test))]
-                    texture
-                        .upload_layer(
-                            0,
-                            0,
-                            0,
-                            page_index,
-                            width as i32,
-                            height as i32,
-                            &image_load_buffer,
-                        )
-                        .unwrap();
-
-                    image_load_buffer.clear();
+                    if normal.is_some() || emissive.is_some() {
+                        build_rgb_a(
+                            #[cfg(not(test))]
+                            &texture,
+                            normal,
+                            emissive,
+                            cache,
+                            texture_registry,
+                            size as u32,
+                            &fallback_rgb_blue,
+                            &fallback_sc_black,
+                            &mut image_load_buffer,
+                        );
+                    }
+                }
+                MaterialEntryDescriptor::DiffuseAlpha(
+                    MaterialDiffuseAlphaDescriptor::Separate { diffuse, alpha },
+                ) => {
+                    if diffuse.is_some() || alpha.is_some() {
+                        build_rgb_a(
+                            #[cfg(not(test))]
+                            &texture,
+                            diffuse,
+                            alpha,
+                            cache,
+                            texture_registry,
+                            size as u32,
+                            &fallback_rgb_white,
+                            &fallback_sc_white,
+                            &mut image_load_buffer,
+                        );
+                    }
                 }
             });
 
         self.desciptors.drain().for_each(|(id, descriptor)| {
             let (width, height) = {
-                if let Some(de) = descriptor.diffuse_emissive {
-                    let entry = MaterialEntryDescriptor::DiffuseEmissive(de);
+                if let Some(da) = descriptor.diffuse_alpha {
+                    let entry = MaterialEntryDescriptor::DiffuseAlpha(da);
                     let cache = &self.cached_entries[&entry];
                     (cache.norm_sub_width, cache.norm_sub_height)
-                } else if let Some(rsod) = descriptor.rsod {
-                    let entry = MaterialEntryDescriptor::Rsod(rsod);
+                } else if let Some(ne) = descriptor.normal_emissive {
+                    let entry = MaterialEntryDescriptor::NormalEmissive(ne);
+                    let cache = &self.cached_entries[&entry];
+                    (cache.norm_sub_width, cache.norm_sub_height)
+                } else if let Some(ormd) = descriptor.ormd {
+                    let entry = MaterialEntryDescriptor::Ormd(ormd);
                     let cache = &self.cached_entries[&entry];
                     (cache.norm_sub_width, cache.norm_sub_height)
                 } else {
@@ -346,16 +376,19 @@ impl MaterialGroupDescriptor {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialDescriptor {
-    /// Diffuse + emissive entry
-    pub diffuse_emissive: Option<MaterialDiffuseEmissiveDescriptor>,
-    /// RSOD (roughness-specular-occlusion-displacement) entry
-    pub rsod: Option<MaterialRsodDescriptor>,
+    /// Diffuse + alpha entry
+    pub diffuse_alpha: Option<MaterialDiffuseAlphaDescriptor>,
+    /// Normal + emissive entry
+    pub normal_emissive: Option<MaterialNormalEmissiveDescriptor>,
+    /// ORMD (occlusion-roughness-metallic-displacement) entry
+    pub ormd: Option<MaterialOrmdDescriptor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MaterialEntryDescriptor {
-    DiffuseEmissive(MaterialDiffuseEmissiveDescriptor),
-    Rsod(MaterialRsodDescriptor),
+    DiffuseAlpha(MaterialDiffuseAlphaDescriptor),
+    NormalEmissive(MaterialNormalEmissiveDescriptor),
+    Ormd(MaterialOrmdDescriptor),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -366,34 +399,58 @@ pub struct MaterialEntryCache {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MaterialDiffuseEmissiveDescriptor {
-    /// Pre-coalesced `diffuse + emissive` where the first 3 channels (RGB)
+pub enum MaterialDiffuseAlphaDescriptor {
+    /// Pre-coalesced `diffuse + alpha` where the first 3 channels (RGB)
     /// represent the diffuse/albedo properties, and the last alpha channel
-    /// represents the emissive property.
+    /// represents the transparency.
     Coalesced(Option<MaterialComponentSource>),
-    /// Separate non-coalesced `diffuse + emissive` where the diffuse is an RGB
-    /// dffuse/albedo texture, and the emissive is a single-channel texture.
+    /// Separate non-coalesced `diffuse + alpha` where the diffuse is an RGB
+    /// dffuse/albedo texture, and the alpha is a single-channel texture.
     ///
     /// This is coalesced into a single RGBA texture later.
     Separate {
         diffuse: Option<MaterialComponentSource>,
+        alpha: Option<MaterialComponentSource>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaterialNormalEmissiveDescriptor {
+    /// Pre-coalesced `normal + emissive` where the first 3 channels (RGB)
+    /// represent the normal map properties, and the last channel
+    /// represents the emissive mapping property.
+    Coalesced(Option<MaterialComponentSource>),
+    /// Separate non-coalesced `normal + emissive` where the normal map is an RGB
+    /// texture, and the last channel is the emissive single-channel texture.
+    ///
+    /// This is coalesced into a single RGBA texture later.
+    Separate {
+        normal: Option<MaterialComponentSource>,
         emissive: Option<MaterialComponentSource>,
     },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MaterialRsodDescriptor {
-    /// Pre-coalesced RSOD where each channel represents roughness,
-    /// specular, occlusion, and displacement, respectively.
+pub enum MaterialOrmdDescriptor {
+    /// Pre-coalesced ORMD where each channel represents occlusion,
+    /// roughness, metallic, and displacement, respectively.
     Coalesced(Option<MaterialComponentSource>),
+    /// Separate non-coalesced `ORM + displacement` where the ORM map is an RGB
+    /// texture, and the displacement map is a single-channel texture.
+    ///
+    /// This is coalesced into a single RGBA texture later.
+    OrmAndDisplacement {
+        orm: Option<MaterialComponentSource>,
+        displacement: Option<MaterialComponentSource>,
+    },
     /// Separate non-coalesced RSOD where each sub-entry is a separate
     /// single-channel texture.
     ///
     /// This is coalesced into a single RGBA texture later.
     Separate {
-        roughness: Option<MaterialComponentSource>,
-        specular: Option<MaterialComponentSource>,
         occlusion: Option<MaterialComponentSource>,
+        roughness: Option<MaterialComponentSource>,
+        metallic: Option<MaterialComponentSource>,
         displacement: Option<MaterialComponentSource>,
     },
 }
@@ -478,11 +535,8 @@ fn coalesce_image_rgb_a(rgb: &[u8], a: &[u8], out: &mut Vec<u8>) {
 
     a.iter()
         .zip(rgb.as_chunks::<3>().0)
-        .for_each(|(a, [r, g, b])| {
-            out.push(*r);
-            out.push(*g);
-            out.push(*b);
-            out.push(*a);
+        .for_each(|(&a, &[r, g, b])| {
+            out.extend_from_slice(&[r, g, b, a]);
         });
 }
 
@@ -493,11 +547,137 @@ fn coalesce_image_4a(r: &[u8], g: &[u8], b: &[u8], a: &[u8], out: &mut Vec<u8>) 
             "cannot coalesce 4 single-channel image buffers into rgba if the number of pixels is not equal"
         );
     }
+
     r.iter()
         .zip(g)
         .zip(b)
         .zip(a)
-        .map(|(((&r, &g), &b), &a)| [r, g, b, a])
-        .flatten()
-        .for_each(|b| out.push(b));
+        .for_each(|(((&r, &g), &b), &a)| {
+            out.extend_from_slice(&[r, g, b, a]);
+        });
+}
+
+fn build_4a(
+    #[cfg(not(test))] target_texture: &Texture,
+    r: &Option<MaterialComponentSource>,
+    g: &Option<MaterialComponentSource>,
+    b: &Option<MaterialComponentSource>,
+    a: &Option<MaterialComponentSource>,
+    cache: &mut MaterialEntryCache,
+    texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
+    max_size: u32,
+    fallback: &[u8],
+    coal_buffer: &mut Vec<u8>,
+) {
+    let r = r.map(|src| src.load(texture_registry));
+    let g = g.map(|src| src.load(texture_registry));
+    let b = b.map(|src| src.load(texture_registry));
+    let a = a.map(|src| src.load(texture_registry));
+
+    let (known_len, width, height) = if let Some(r) = &r {
+        let w = r.0.width();
+        let h = r.0.height();
+        ((w * h) as usize, w, h)
+    } else if let Some(g) = &g {
+        let w = g.0.width();
+        let h = g.0.height();
+        ((w * h) as usize, w, h)
+    } else if let Some(b) = &b {
+        let w = b.0.width();
+        let h = b.0.height();
+        ((w * h) as usize, w, h)
+    } else if let Some(a) = &a {
+        let w = a.0.width();
+        let h = a.0.height();
+        ((w * h) as usize, w, h)
+    } else {
+        ((max_size * max_size) as usize, max_size, max_size)
+    };
+
+    let r = r
+        .as_ref()
+        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+    let g = g
+        .as_ref()
+        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+    let b = b
+        .as_ref()
+        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+    let a = a
+        .as_ref()
+        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+    coalesce_image_4a(r, g, b, a, coal_buffer);
+
+    cache.norm_sub_width = width as f32 / max_size as f32;
+    cache.norm_sub_height = height as f32 / max_size as f32;
+    let page_index = cache.assigned_page_index as i32;
+
+    #[cfg(not(test))]
+    target_texture
+        .upload_layer(
+            0,
+            0,
+            0,
+            page_index,
+            width as i32,
+            height as i32,
+            coal_buffer,
+        )
+        .unwrap();
+
+    coal_buffer.clear();
+}
+
+fn build_rgb_a(
+    #[cfg(not(test))] target_texture: &Texture,
+    rgb: &Option<MaterialComponentSource>,
+    alpha: &Option<MaterialComponentSource>,
+    cache: &mut MaterialEntryCache,
+    texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
+    max_size: u32,
+    rgb_fallback: &[u8],
+    alpha_fallback: &[u8],
+    coal_buffer: &mut Vec<u8>,
+) {
+    let rgb = rgb.map(|src| src.load(texture_registry));
+    let alpha = alpha.map(|src| src.load(texture_registry));
+
+    let (known_len, width, height) = if let Some(rgb) = &rgb {
+        let w = rgb.0.width();
+        let h = rgb.0.height();
+        ((w * h) as usize, w, h)
+    } else if let Some(alpha) = &alpha {
+        let w = alpha.0.width();
+        let h = alpha.0.height();
+        ((w * h) as usize, w, h)
+    } else {
+        ((max_size * max_size) as usize, max_size, max_size)
+    };
+
+    let rgb = rgb
+        .as_ref()
+        .map_or(&rgb_fallback[..known_len * 3], |src| src.0.as_bytes());
+    let alpha = alpha
+        .as_ref()
+        .map_or(&alpha_fallback[..known_len], |src| src.0.as_bytes());
+    coalesce_image_rgb_a(rgb, alpha, coal_buffer);
+
+    cache.norm_sub_width = width as f32 / max_size as f32;
+    cache.norm_sub_height = height as f32 / max_size as f32;
+    let page_index = cache.assigned_page_index as i32;
+
+    #[cfg(not(test))]
+    target_texture
+        .upload_layer(
+            0,
+            0,
+            0,
+            page_index,
+            width as i32,
+            height as i32,
+            coal_buffer,
+        )
+        .unwrap();
+
+    coal_buffer.clear();
 }

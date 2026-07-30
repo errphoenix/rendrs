@@ -150,30 +150,39 @@ impl Default for MaterialParams {
 /// Specifies the [`MaterialEntryLocation`] of a diffuse and RSO
 /// (roughness-specular-occlusion) entry as 2 distinct textures.
 ///
-/// The diffuse_and_emissive entry is a single RGBA texture, where RGB is the
-/// diffuse/albedo property of the texture, and the alpha component is the
-/// emissive property.
+/// The `diffuse_and_alpha` entry is an RGBA texture, where RGB is the
+/// diffuse/albedo property of the material, and the alpha component is the
+/// transparency property, where 0 is transparent and 1 is opaque.
 ///
-/// RSOD is also a single RGBA texture, where each channel represents a
-/// different material property. These are, in order: roughness, specular,
-/// occlusion (as in, ambient occlusion), and displacement.
+/// The `normal_and_emissive` entry is an RGBA texture, where RGB is the
+/// normal mapping for the material, and the alpha component is the emissive
+/// property of the material.
 ///
-/// This also contains the width and height of the textures as a normalized
-/// `[0.0 - 1.0]` range, which is equal for both entries.
+/// ORMD is an RGBA texture, where each channel represents a
+/// different material property. These are, in order: occlusion, roughness,
+/// metallic, and displacement.
+///
+/// Also stores the width and height of the textures as a normalized
+/// `[0.0 - 1.0]` range.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MaterialLocation {
-    diffuse_and_emissive: MaterialEntryLocation,
-    rsod_entry: MaterialEntryLocation,
+    diffuse_and_alpha: MaterialEntryLocation,
+    normal_and_emissive: MaterialEntryLocation,
+    ormd: MaterialEntryLocation,
     width: f32,
     height: f32,
 }
 impl MaterialLocation {
-    pub const fn diffuse_and_emissive(&self) -> MaterialEntryLocation {
-        self.diffuse_and_emissive
+    pub const fn diffuse_and_alpha(&self) -> MaterialEntryLocation {
+        self.diffuse_and_alpha
     }
 
-    pub const fn rsod(&self) -> MaterialEntryLocation {
-        self.rsod_entry
+    pub const fn normal_and_emissive(&self) -> MaterialEntryLocation {
+        self.normal_and_emissive
+    }
+
+    pub const fn ormd(&self) -> MaterialEntryLocation {
+        self.ormd
     }
 
     pub const fn width(&self) -> f32 {
