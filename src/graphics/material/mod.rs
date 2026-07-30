@@ -427,22 +427,28 @@ mod tests {
         let mut asset_registry = AssetRegistry::<RawTexture, TextureMetadata>::new();
 
         const SOURCE_DIFFUSE_0: &'static str = "test_64px_rgb.jpg";
+        const SOURCE_ALPHA_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_DIFFUSE_AND_ALPHA_0: &'static str = "test_64px_rgba.png";
+        const SOURCE_NORMAL_0: &'static str = "test_64px_rgb.jpg";
         const SOURCE_EMISSIVE_0: &'static str = "test_64px_gray.jpg";
-        const SOURCE_DIFFUSE_AND_EMISSIVE_0: &'static str = "test_64px_rgba.png";
-        const SOURCE_ROUGHNESS_0: &'static str = "test_64px_gray.jpg";
-        const SOURCE_SPECULAR_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_NORMAL_AND_EMISSIVE_0: &'static str = "test_64px_rgba.png";
         const SOURCE_OCCLUSION_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_ROUGHNESS_0: &'static str = "test_64px_gray.jpg";
+        const SOURCE_METALLIC_0: &'static str = "test_64px_gray.jpg";
         const SOURCE_DISPLACEMENT_0: &'static str = "test_64px_gray.jpg";
-        const SOURCE_RSOD_0: &'static str = "test_64px_rgba.png";
+        const SOURCE_ORMD_0: &'static str = "test_64px_rgba.png";
         ethel::hashet!(
             const SOURCE_DIFFUSE_1 = "diffuse_1.src";
+            const SOURCE_ALPHA_1 = "alpha_1.src";
+            const SOURCE_DIFFUSE_AND_ALPHA_1 = "diffuse_and_alpha_1.src";
+            const SOURCE_NORMAL_1 = "NORMAL_1.src";
             const SOURCE_EMISSIVE_1 = "emissive_1.src";
-            const SOURCE_DIFFUSE_AND_EMISSIVE_1 = "diffuse_and_emissive_1.src";
-            const SOURCE_ROUGHNESS_1 = "roughness_1.src";
-            const SOURCE_SPECULAR_1 = "specular_1.src";
+            const SOURCE_NORMAL_AND_EMISSIVE_1 = "normal_and_emissive_1.src";
             const SOURCE_OCCLUSION_1 = "occlusion_1.src";
+            const SOURCE_ROUGHNESS_1 = "roughness_1.src";
+            const SOURCE_METALLIC_1 = "metallic_1.src";
             const SOURCE_DISPLACEMENT_1 = "displacement_1.src";
-            const SOURCE_RSOD_1 = "rsod_1.src";
+            const SOURCE_ORMD_1 = "ormd_1.src";
 
             const MATERIAL_A = "test_material_a";
             const MATERIAL_B = "test_material_b";
@@ -466,47 +472,59 @@ mod tests {
         };
         {
             process_asset(*SOURCE_DIFFUSE_1, 3);
+            process_asset(*SOURCE_ALPHA_1, 1);
+            process_asset(*SOURCE_DIFFUSE_AND_ALPHA_1, 4);
+            process_asset(*SOURCE_NORMAL_1, 3);
             process_asset(*SOURCE_EMISSIVE_1, 1);
-            process_asset(*SOURCE_DIFFUSE_AND_EMISSIVE_1, 4);
-            process_asset(*SOURCE_ROUGHNESS_1, 1);
-            process_asset(*SOURCE_SPECULAR_1, 1);
+            process_asset(*SOURCE_NORMAL_AND_EMISSIVE_1, 4);
             process_asset(*SOURCE_OCCLUSION_1, 1);
+            process_asset(*SOURCE_ROUGHNESS_1, 1);
+            process_asset(*SOURCE_METALLIC_1, 1);
             process_asset(*SOURCE_DISPLACEMENT_1, 1);
-            process_asset(*SOURCE_RSOD_1, 4);
+            process_asset(*SOURCE_ORMD_1, 4);
         }
 
         let mat_a_diffuse = MaterialComponentSource::Path(SOURCE_DIFFUSE_0);
+        let mat_a_alpha = MaterialComponentSource::Path(SOURCE_ALPHA_0);
+        let mat_a_normal = MaterialComponentSource::Path(SOURCE_NORMAL_0);
         let mat_a_emissive = MaterialComponentSource::Path(SOURCE_EMISSIVE_0);
-        let mat_a_roughness = MaterialComponentSource::Asset(*SOURCE_ROUGHNESS_1);
-        let mat_a_specular = MaterialComponentSource::Asset(*SOURCE_SPECULAR_1);
         let mat_a_occlusion = MaterialComponentSource::Asset(*SOURCE_OCCLUSION_1);
+        let mat_a_roughness = MaterialComponentSource::Asset(*SOURCE_ROUGHNESS_1);
+        let mat_a_metallic = MaterialComponentSource::Asset(*SOURCE_METALLIC_1);
         let mat_a_displacement = MaterialComponentSource::Path(SOURCE_DISPLACEMENT_0);
 
-        let mat_b_diffuse_and_emissive =
-            MaterialComponentSource::Asset(*SOURCE_DIFFUSE_AND_EMISSIVE_1);
+        let mat_b_diffuse_and_alpha = MaterialComponentSource::Asset(*SOURCE_DIFFUSE_AND_ALPHA_1);
+        let mat_b_normal_and_emissive =
+            MaterialComponentSource::Asset(*SOURCE_NORMAL_AND_EMISSIVE_1);
         let mat_b_roughness = MaterialComponentSource::Asset(*SOURCE_ROUGHNESS_1);
-        let mat_b_specular = MaterialComponentSource::Asset(*SOURCE_SPECULAR_1);
+        let mat_b_metallic = MaterialComponentSource::Asset(*SOURCE_METALLIC_1);
 
         let mat_c_diffuse = MaterialComponentSource::Asset(*SOURCE_DIFFUSE_1);
-        let mat_c_emissive = MaterialComponentSource::Asset(*SOURCE_EMISSIVE_1);
-        let mat_c_rsod = MaterialComponentSource::Asset(*SOURCE_RSOD_1);
+        let mat_c_alpha = MaterialComponentSource::Asset(*SOURCE_ALPHA_1);
+        let mat_c_ormd = MaterialComponentSource::Asset(*SOURCE_ORMD_1);
 
         let mat_d_diffuse = MaterialComponentSource::Asset(*SOURCE_DIFFUSE_1);
-        let mat_d_emissive = MaterialComponentSource::Asset(*SOURCE_EMISSIVE_1);
-        let mat_d_rsod = MaterialComponentSource::Asset(*SOURCE_RSOD_1);
+        let mat_d_alpha = MaterialComponentSource::Asset(*SOURCE_ALPHA_1);
+        let mat_d_normal_and_emissive =
+            MaterialComponentSource::Asset(*SOURCE_NORMAL_AND_EMISSIVE_1);
+        let mat_d_ormd = MaterialComponentSource::Asset(*SOURCE_ORMD_1);
 
         let mut group = MaterialGroupDescriptor::new(TEST_PAGES, TEST_SIZE);
         group.add(
             MaterialId(MATERIAL_A.hash().inner()),
             MaterialDescriptor {
-                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                diffuse_alpha: Some(MaterialDiffuseAlphaDescriptor::Separate {
                     diffuse: Some(mat_a_diffuse),
+                    alpha: Some(mat_a_alpha),
+                }),
+                normal_emissive: Some(MaterialNormalEmissiveDescriptor::Separate {
+                    normal: Some(mat_a_normal),
                     emissive: Some(mat_a_emissive),
                 }),
-                rsod: Some(MaterialRsodDescriptor::Separate {
-                    roughness: Some(mat_a_roughness),
-                    specular: Some(mat_a_specular),
+                ormd: Some(MaterialOrmdDescriptor::Separate {
                     occlusion: Some(mat_a_occlusion),
+                    roughness: Some(mat_a_roughness),
+                    metallic: Some(mat_a_metallic),
                     displacement: Some(mat_a_displacement),
                 }),
             },
@@ -514,13 +532,16 @@ mod tests {
         group.add(
             MaterialId(MATERIAL_B.hash().inner()),
             MaterialDescriptor {
-                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Coalesced(Some(
-                    mat_b_diffuse_and_emissive,
+                diffuse_alpha: Some(MaterialDiffuseAlphaDescriptor::Coalesced(Some(
+                    mat_b_diffuse_and_alpha,
                 ))),
-                rsod: Some(MaterialRsodDescriptor::Separate {
-                    roughness: Some(mat_b_roughness),
-                    specular: Some(mat_b_specular),
+                normal_emissive: Some(MaterialNormalEmissiveDescriptor::Coalesced(Some(
+                    mat_b_normal_and_emissive,
+                ))),
+                ormd: Some(MaterialOrmdDescriptor::Separate {
                     occlusion: None,
+                    roughness: Some(mat_b_roughness),
+                    metallic: Some(mat_b_metallic),
                     displacement: None,
                 }),
             },
@@ -528,21 +549,25 @@ mod tests {
         group.add(
             MaterialId(MATERIAL_C.hash().inner()),
             MaterialDescriptor {
-                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                diffuse_alpha: Some(MaterialDiffuseAlphaDescriptor::Separate {
                     diffuse: Some(mat_c_diffuse),
-                    emissive: Some(mat_c_emissive),
+                    alpha: Some(mat_c_alpha),
                 }),
-                rsod: Some(MaterialRsodDescriptor::Coalesced(Some(mat_c_rsod))),
+                normal_emissive: None,
+                ormd: Some(MaterialOrmdDescriptor::Coalesced(Some(mat_c_ormd))),
             },
         );
         group.add(
             MaterialId(MATERIAL_D.hash().inner()),
             MaterialDescriptor {
-                diffuse_emissive: Some(MaterialDiffuseEmissiveDescriptor::Separate {
+                diffuse_alpha: Some(MaterialDiffuseAlphaDescriptor::Separate {
                     diffuse: Some(mat_d_diffuse),
-                    emissive: Some(mat_d_emissive),
+                    alpha: Some(mat_d_alpha),
                 }),
-                rsod: Some(MaterialRsodDescriptor::Coalesced(Some(mat_d_rsod))),
+                normal_emissive: Some(MaterialNormalEmissiveDescriptor::Coalesced(Some(
+                    mat_d_normal_and_emissive,
+                ))),
+                ormd: Some(MaterialOrmdDescriptor::Coalesced(Some(mat_d_ormd))),
             },
         );
 
@@ -583,6 +608,7 @@ mod tests {
         assert!(mat_c.width > 0.0 && mat_c.height > 0.0);
         assert!(mat_d.width > 0.0 && mat_d.height > 0.0);
 
-        assert_eq!(mat_c.rsod_entry, mat_d.rsod_entry);
+        assert_eq!(mat_b.normal_and_emissive, mat_d.normal_and_emissive);
+        assert_eq!(mat_c.ormd, mat_d.ormd);
     }
 }
