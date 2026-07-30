@@ -337,67 +337,82 @@ macro_rules! material_groups_internal {
         gd
     };
 
-    (@entry
-        entry($id:expr) {
-            $($comp:tt)*
-        };
-    ) => {
-        $crate::material_groups_internal!(@entry_body $id, $comp)
-    };
-
     (@entry_body
         $( $comp_type:ident = $loc_kind:ident( $loc_value:expr ); )*
     ) => {{
         #[allow(unused)]
         // default blank sources
         let mut d_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut a_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut da_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut n_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
         let mut e_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
-        let mut de_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
-        let mut r_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
-        let mut s_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut ne_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
         let mut o_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut r_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut m_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
         let mut di_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
-        let mut rsod_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut orm_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
+        let mut ormd_source = None::<$crate::graphics::material::builder::MaterialComponentSource>;
 
         $(
             match stringify!($comp_type) {
                 "diffuse" => {
                     d_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value));
                 },
+                "alpha" => a_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "diffuse_alpha" | "da" | "diffuse_and_alpha" => da_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "normal" => {
+                    n_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value));
+                },
                 "emissive" => e_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
-                "diffuse_emissive" | "de" | "diffuse_and_emissive" => de_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
-                "roughness" => r_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
-                "specular" => s_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "normal_emissive" | "ne" | "normal_and_emissive" => ne_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
                 "occlusion" => o_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "roughness" => r_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "metallic" => m_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
                 "displacement" => di_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
-                "rsod" | "lighting" => rsod_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "orm" | "ORM" | "lighting" => orm_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
+                "ormd" | "lighting_and_displacement" => ormd_source = Some($crate::material_groups_internal!(@component_src $loc_kind $loc_value)),
                 _ => {},
             }
         )*
 
-        let de_desc = if de_source.is_some() {
-            $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Coalesced(de_source)
+        let da_desc = if da_source.is_some() {
+            $crate::graphics::material::builder::MaterialDiffuseAlphaDescriptor::Coalesced(da_source)
         } else {
-            $crate::graphics::material::builder::MaterialDiffuseEmissiveDescriptor::Separate {
+            $crate::graphics::material::builder::MaterialDiffuseAlphaDescriptor::Separate {
                 diffuse: d_source,
+                alpha: a_source,
+            }
+        };
+        let ne_desc = if ne_source.is_some() {
+            $crate::graphics::material::builder::MaterialNormalEmissiveDescriptor::Coalesced(ne_source)
+        } else {
+            $crate::graphics::material::builder::MaterialNormalEmissiveDescriptor::Separate {
+                normal: n_source,
                 emissive: e_source,
             }
         };
-
-        let rsod_desc = if rsod_source.is_some() {
-            $crate::graphics::material::builder::MaterialRsodDescriptor::Coalesced(rsod_source)
+        let ormd_desc = if ormd_source.is_some() {
+            $crate::graphics::material::builder::MaterialOrmdDescriptor::Coalesced(ormd_source)
+        } else if orm_source.is_some() {
+            $crate::graphics::material::builder::MaterialOrmdDescriptor::OrmAndDisplacement {
+                orm: orm_source,
+                displacement: di_source,
+            }
         } else {
-            $crate::graphics::material::builder::MaterialRsodDescriptor::Separate {
-                roughness: r_source,
-                specular: s_source,
+            $crate::graphics::material::builder::MaterialOrmdDescriptor::Separate {
                 occlusion: o_source,
+                roughness: r_source,
+                metallic: m_source,
                 displacement: di_source,
             }
         };
 
         $crate::graphics::material::builder::MaterialDescriptor {
-            diffuse_emissive: Some(de_desc),
-            rsod: Some(rsod_desc),
+            diffuse_alpha: Some(da_desc),
+            normal_emissive: Some(ne_desc),
+            ormd: Some(ormd_desc),
         }
     }};
 
