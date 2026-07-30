@@ -283,7 +283,7 @@ macro_rules! material_groups {
                         ethel::assets::RawTexture,
                         ethel::assets::TextureMetadata
                     >,
-                    material_registry: &mut MaterialLocationRegistry,
+                    material_registry: &mut $crate::graphics::material::MaterialLocationRegistry,
                 ) -> $crate::graphics::material::MaterialGroup {
                     let mut builder = [< material_group_ $g_name:lower _builder >]();
                     builder.distribute_pages();
