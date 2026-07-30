@@ -409,6 +409,7 @@ mod tests {
     use super::builder::*;
     use super::*;
 
+    #[allow(unused)]
     #[test]
     fn material_group_composition() {
         const TEST_PAGES: u16 = 128;

@@ -82,11 +82,11 @@ pub const LIB_LIGHT_ATTENUATE_DISTANCE_FALLOFF: GlslLib = ethel::shader_glsl_lib
 /// Spotlight falloff curve through standard penumbra/umbra, squared.
 ///
 /// Creates the `lightSpotlightFalloff` function with the following parameters:
-/// * `float penumbra_cos` the cosine angle of the penumbra angle of
+/// * `float penumbra_cos` the cosine of the penumbra angle of
 ///    the spotlight.
-/// * `float umbra_cos` the cosine angle of the umbra angle of
+/// * `float umbra_cos` the cosine of the umbra angle of
 ///    the spotlight.
-/// * `float surfaece_cos` the cosine angle of the angle between the
+/// * `float surface_cos` the cosine of the angle between the
 ///    spotlight's direction and vector pointing from the surface to the
 ///    light.
 ///
@@ -112,11 +112,11 @@ pub const LIB_LIGHT_SPOTLIGHT_FALLOFF_SQ: GlslLib = ethel::shader_glsl_lib! {
 /// Spotlight falloff curve through standard penumbra/umbra, plus a smoothstep.
 ///
 /// Creates the `lightSpotlightFalloff` function with the following parameters:
-/// * `float penumbra_cos` the cosine angle of the penumbra angle of
+/// * `float penumbra_cos` the cosine of the penumbra angle of
 ///    the spotlight.
-/// * `float umbra_cos` the cosine angle of the umbra angle of
+/// * `float umbra_cos` the cosine of the umbra angle of
 ///    the spotlight.
-/// * `float surfaece_cos` the cosine angle of the angle between the
+/// * `float surface_cos` the cosine of the angle between the
 ///    spotlight's direction and vector pointing from the surface to the
 ///    light.
 ///

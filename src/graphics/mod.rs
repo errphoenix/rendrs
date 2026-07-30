@@ -20,11 +20,17 @@ impl LightsBuffer {
         }
     }
 
-    pub fn bind_shader_storage(&self, section: usize, lighting: u32, volumes: u32, offset: u32) {
+    pub fn bind_shader_storage(
+        &self,
+        section: usize,
+        lighting_ssbo_index: u32,
+        volumes_ssbo_index: u32,
+        offset: u32,
+    ) {
         self.lighting_data
-            .bind_shader_storage(section, lighting, offset);
+            .bind_shader_storage(section, lighting_ssbo_index, offset);
         self.volume_data
-            .bind_shader_storage(section, volumes, offset);
+            .bind_shader_storage(section, volumes_ssbo_index, offset);
     }
 
     /// Get read access to a `section` of the underlying triple buffer.
