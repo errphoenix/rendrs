@@ -1,4 +1,5 @@
 pub mod builder;
+pub mod shader;
 
 use ethel::assets::RawTexture;
 use image::{EncodableLayout, RgbaImage};
@@ -60,8 +61,8 @@ impl MaterialGroup {
 
     #[cfg(not(test))]
     #[cfg(feature = "pipeline")]
-    pub fn sampler(&self) -> SamplerObject {
-        SamplerObject::new(&self.array_texture_object)
+    pub const fn sampler(&self) -> SamplerObject {
+        SamplerObject::new(self.array_texture_object.view())
     }
 
     #[cfg(not(test))]
@@ -164,6 +165,7 @@ impl Default for MaterialParams {
 ///
 /// Also stores the width and height of the textures as a normalized
 /// `[0.0 - 1.0]` range.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MaterialLocation {
     diffuse_and_alpha: MaterialEntryLocation,

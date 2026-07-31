@@ -270,7 +270,7 @@ impl SamplerObject {
     }
 
     pub const fn new(texture: TextureView) -> Self {
-        Self(texture))
+        Self(texture)
     }
 
     pub const fn texture(&self) -> TextureView {
