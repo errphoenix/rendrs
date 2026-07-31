@@ -1,4 +1,4 @@
-use ethel::shader::{GlslLib, WriteValue};
+use ethel::shader::{GlslLib, GlslStruct, WriteValue};
 
 use crate::graphics::material::MaterialEntryLocation;
 
@@ -30,6 +30,10 @@ pub const LIB_MATERIAL_ENTRY_UNPACK: GlslLib = ethel::shader_glsl_lib! {
         return uvec2(group, page);
     "
 };
+
+pub const TYPE_MATERIAL_ENTRY_LOCATION: GlslStruct =
+    MaterialEntryLocationGlslStruct::as_definition();
+pub const TYPE_MATERIAL_LOCATION: GlslStruct = MaterialLocationGlslStruct::as_definition();
 
 ethel::shader_glsl_struct! {
     struct MaterialEntryLocation {
