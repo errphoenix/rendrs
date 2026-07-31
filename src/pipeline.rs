@@ -265,8 +265,12 @@ pub enum ImageAccessKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SamplerObject(TextureView);
 impl SamplerObject {
-    pub fn new(texture: impl Into<TextureView>) -> Self {
+    pub fn from_texture(texture: impl Into<TextureView>) -> Self {
         Self(texture.into())
+    }
+
+    pub const fn new(texture: TextureView) -> Self {
+        Self(texture))
     }
 
     pub const fn texture(&self) -> TextureView {
