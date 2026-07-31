@@ -1,5 +1,8 @@
 pub mod glsl;
 
+#[allow(unused_imports)]
+pub use glsl::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Oct3x2Float32 {
     pub x: f32,
