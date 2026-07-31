@@ -4,7 +4,7 @@ use ethel::assets::{AssetId, AssetRegistry, RawTexture, TextureMetadata};
 use image::EncodableLayout;
 use janus::{
     StringMap,
-    texture::{MipLevels, Tex, Texture},
+    texture::{MipLevels, Tex, Texture, TextureFiltering, TextureWrapping},
 };
 
 use crate::graphics::material::{
@@ -188,14 +188,19 @@ impl MaterialGroupDescriptor {
 
         let size = self.size as i32;
         #[cfg(not(test))]
-        let texture = Texture::new_array(
-            size,
-            size,
-            self.pages as i32,
-            MipLevels::default(),
-            super::MATERIAL_TEXTURE_PIXEL_TYPE,
-            super::MATERIAL_TEXTURE_FORMAT,
-        );
+        let texture = {
+            let texture = Texture::new_array(
+                size,
+                size,
+                self.pages as i32,
+                MipLevels::default(),
+                super::MATERIAL_TEXTURE_PIXEL_TYPE,
+                super::MATERIAL_TEXTURE_FORMAT,
+            );
+            texture.set_filtering_minmag(TextureFiltering::Nearest);
+            texture.set_wrapping_st(TextureWrapping::Repeat);
+            texture
+        };
 
         // load default blank texture at page 0
         #[cfg(not(test))]
