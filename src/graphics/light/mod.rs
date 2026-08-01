@@ -1,5 +1,8 @@
 pub mod shader;
 
+#[allow(unused_imports)]
+pub use shader::*;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LightVolume {
