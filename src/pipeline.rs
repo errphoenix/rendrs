@@ -315,6 +315,9 @@ impl OutputObject {
 pub trait CtxType {
     type Ctx<'ctx>;
 }
+impl CtxType for () {
+    type Ctx<'ctx> = ();
+}
 
 #[macro_export]
 macro_rules! context_wrapper {
