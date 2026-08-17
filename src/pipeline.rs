@@ -2,8 +2,11 @@ use ethel::{
     render::{Resolution, buffer::StorageSection},
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
-use janus::texture::{
-    ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
+use janus::{
+    GlProperty,
+    texture::{
+        ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
+    },
 };
 
 use crate::framebuffer::{Framebuffer, FramebufferError, FramebufferView, HasFramebuffer};
@@ -223,34 +226,130 @@ impl RenderPool {
     }
 }
 
-/// todo: refactor like [`OutputObject`]
+/// A uniform image object with compute shader access and layout metadata.
 ///
-/// An uniform image used in compute passes.
-#[derive(Debug)]
-pub struct ImageTarget {
-    label: &'static str,
-    image: TextureView,
+/// Also see [`ImageObject`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImageObjectTarget {
+    object: ImageObject,
     access: ImageAccessKind,
+    unit: u32,
+    layer: Option<u32>,
 }
-impl ImageTarget {
-    pub const fn new(label: &'static str, image: TextureView, access: ImageAccessKind) -> Self {
+impl ImageObjectTarget {
+    pub const fn new(
+        object: ImageObject,
+        access: ImageAccessKind,
+        unit: u32,
+        layer: Option<u32>,
+    ) -> Self {
         Self {
-            label,
-            image,
+            object,
             access,
+            unit,
+            layer,
         }
     }
 
-    pub const fn label(&self) -> &'static str {
-        self.label
+    pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
+        self.object.revalidate_if_pooled(render_pool);
     }
 
-    pub const fn image(&self) -> &TextureView {
-        &self.image
+    pub const fn inner_image(&self) -> ImageObject {
+        self.object
     }
 
-    pub const fn access(&self) -> ImageAccessKind {
-        self.access
+    pub const fn inner_image_mut(&mut self) -> &mut ImageObject {
+        &mut self.object
+    }
+
+    pub const fn unit(&self) -> u32 {
+        self.unit
+    }
+
+    pub const fn layer(&self) -> Option<u32> {
+        self.layer
+    }
+
+    pub const fn is_layer(&self) -> bool {
+        self.layer.is_some()
+    }
+
+    pub fn bind(&self) {
+        self.object.bind(self.unit, self.layer, self.access);
+    }
+}
+
+/// A uniform image object used in compute passes.
+///
+/// Can either refer to a [`RenderPool`] target as [`ImageTarget::FromPool`]
+/// or a to direct [`TextureView`] handle with [`ImageTarget::DirectTexture`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageObject {
+    PoolTarget(RenderTargetAccessor),
+    DirectTexture(TextureView),
+}
+impl ImageObject {
+    pub const fn from_pool_target(accessor: RenderTargetAccessor) -> Self {
+        Self::PoolTarget(accessor)
+    }
+
+    pub const fn from_direct_texture(texture: TextureView) -> Self {
+        Self::DirectTexture(texture)
+    }
+
+    pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
+        if let Self::PoolTarget(accessor) = self {
+            accessor.revalidate(render_pool);
+        }
+    }
+
+    pub const fn is_pool_target(&self) -> bool {
+        matches!(self, Self::PoolTarget(_))
+    }
+
+    pub const fn is_direct_texture(&self) -> bool {
+        matches!(self, Self::DirectTexture(_))
+    }
+
+    pub const fn accessor(&self) -> Option<RenderTargetAccessor> {
+        match self {
+            Self::PoolTarget(render_target_accessor) => Some(*render_target_accessor),
+            Self::DirectTexture(_) => None,
+        }
+    }
+
+    pub const fn accessor_mut(&mut self) -> Option<&mut RenderTargetAccessor> {
+        match self {
+            ImageObject::PoolTarget(render_target_accessor) => Some(render_target_accessor),
+            ImageObject::DirectTexture(_) => None,
+        }
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        match self {
+            Self::PoolTarget(render_target_accessor) => render_target_accessor.texture,
+            Self::DirectTexture(texture_view) => *texture_view,
+        }
+    }
+
+    pub fn bind(&self, unit: u32, layer: Option<u32>, access: ImageAccessKind) {
+        let layered = layer.is_none() as u8;
+        let layer = layer.unwrap_or_default() as i32;
+        let texture = self.texture().texture_id();
+        let access = access.property_enum();
+        let format = self.texture().metadata().internal_format();
+        unsafe {
+            janus::gl::BindImageTexture(
+                unit,
+                texture,
+                0,
+                layered,
+                layer,
+                access,
+                format.glenum_internal_format(),
+            );
+        }
     }
 }
 
@@ -259,6 +358,15 @@ pub enum ImageAccessKind {
     ReadOnly,
     WriteOnly,
     ReadWrite,
+}
+impl janus::GlProperty for ImageAccessKind {
+    fn property_enum(self) -> u32 {
+        match self {
+            ImageAccessKind::ReadOnly => janus::gl::READ_ONLY,
+            ImageAccessKind::WriteOnly => janus::gl::WRITE_ONLY,
+            ImageAccessKind::ReadWrite => janus::gl::READ_WRITE,
+        }
+    }
 }
 
 /// An uniform sampler object.
@@ -501,7 +609,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
 pub struct ComputePass<K: CtxType, const S: usize, const I: usize> {
     shader: ComputeShaderHandleView,
     samplers: [SamplerObject; S],
-    images: [ImageTarget; I],
+    images: [ImageObjectTarget; I],
     pre_dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>) -> [u32; 3],
 }
 impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I> {
@@ -510,8 +618,10 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
         self.shader
     }
 
-    fn revalidate(&mut self, _render_pool: &RenderPool) {
-        //todo: revalidate images
+    fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.images
+            .iter_mut()
+            .for_each(|image| image.revalidate_if_pooled(render_pool));
     }
 
     fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &K::Ctx<'_>) {
@@ -526,7 +636,7 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     pub const fn new(
         shader: ComputeShaderHandleView,
         samplers: [SamplerObject; S],
-        images: [ImageTarget; I],
+        images: [ImageObjectTarget; I],
         pre_dispatch: fn(StorageSection, &K::Ctx<'_>) -> [u32; 3],
     ) -> Self {
         Self {
@@ -554,14 +664,14 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     }
 
     pub fn bind_images(&self) {
-        //todo
+        self.images.iter().for_each(ImageObjectTarget::bind);
     }
 
-    pub fn image_target(&self, index: usize) -> &ImageTarget {
+    pub fn image_target(&self, index: usize) -> &ImageObjectTarget {
         &self.images[index]
     }
 
-    pub const fn image_targets(&self) -> &[ImageTarget; I] {
+    pub const fn image_targets(&self) -> &[ImageObjectTarget; I] {
         &self.images
     }
 }
