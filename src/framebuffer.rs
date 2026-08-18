@@ -38,6 +38,21 @@ impl From<&Framebuffer> for FramebufferId {
         value.id
     }
 }
+impl janus::GpuResource for FramebufferId {
+    fn resource_id(&self) -> u32 {
+        self.0
+    }
+}
+impl janus::GpuResource for FramebufferView {
+    fn resource_id(&self) -> u32 {
+        self.id.0
+    }
+}
+impl janus::GpuResource for Framebuffer {
+    fn resource_id(&self) -> u32 {
+        self.id.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttachmentTexture(TextureView);

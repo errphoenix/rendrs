@@ -3,7 +3,7 @@ use ethel::{
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::{
-    GlProperty,
+    GlProperty, GpuResource,
     texture::{
         ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
     },
@@ -253,6 +253,26 @@ impl ImageObjectTarget {
 
     pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
         self.object.revalidate_if_pooled(render_pool);
+    }
+
+    pub const fn is_pool_target(&self) -> bool {
+        self.object.is_pool_target()
+    }
+
+    pub const fn is_direct_texture(&self) -> bool {
+        self.object.is_direct_texture()
+    }
+
+    pub const fn accessor(&self) -> Option<RenderTargetAccessor> {
+        self.object.accessor()
+    }
+
+    pub const fn accessor_mut(&mut self) -> Option<&mut RenderTargetAccessor> {
+        self.object.accessor_mut()
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        self.object.texture()
     }
 
     pub const fn inner_image(&self) -> ImageObject {
@@ -673,5 +693,67 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
 
     pub const fn image_targets(&self) -> &[ImageObjectTarget; I] {
         &self.images
+    }
+}
+
+#[derive(Debug)]
+struct BlitPassCtx;
+impl CtxType for BlitPassCtx {
+    type Ctx<'ctx> = ();
+}
+
+#[derive(Debug)]
+pub struct BlitPass {
+    inner: DrawPass<BlitPassCtx, 0, 0>,
+    source: RenderTargetAccessor,
+}
+impl BlitPass {
+    pub fn new(source: RenderTargetAccessor) -> Self {
+        Self {
+            source,
+            inner: DrawPass::new(ShaderHandleView::default(), [], [], |_, _| {}),
+        }
+    }
+
+    pub fn revalidate_source(&mut self, render_pool: &RenderPool) {
+        self.source.revalidate(render_pool);
+    }
+
+    pub const fn source(&self) -> &RenderTargetAccessor {
+        &self.source
+    }
+
+    pub const fn source_mut(&mut self) -> &mut RenderTargetAccessor {
+        &mut self.source
+    }
+
+    pub const fn set_source(&mut self, source: RenderTargetAccessor) -> RenderTargetAccessor {
+        std::mem::replace(&mut self.source, source)
+    }
+
+    pub fn execute(&self, render_pool: &RenderPool) {
+        self.inner.execute(StorageSection::Front, render_pool, &());
+        let framebuffer = self.inner.framebuffer().unwrap();
+        framebuffer.set_read_buffer(Some(0));
+
+        let read_framebuffer = framebuffer.resource_id();
+        let (w, h) = self.source.texture.size();
+
+        unsafe {
+            janus::gl::BlitNamedFramebuffer(
+                read_framebuffer,
+                0,
+                0,
+                0,
+                w,
+                h,
+                0,
+                0,
+                w,
+                h,
+                janus::gl::COLOR_BUFFER_BIT,
+                janus::gl::NEAREST,
+            );
+        }
     }
 }
