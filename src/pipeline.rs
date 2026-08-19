@@ -716,19 +716,25 @@ impl CtxType for BlitPassCtx {
 
 #[derive(Debug)]
 pub struct BlitPass {
-    inner: DrawPass<BlitPassCtx, 0, 0>,
+    inner: DrawPass<BlitPassCtx, 0, 1>,
     source: RenderTargetAccessor,
 }
 impl BlitPass {
     pub fn new(source: RenderTargetAccessor) -> Self {
         Self {
             source,
-            inner: DrawPass::new(ShaderHandleView::default(), [], [], |_, _| {}),
+            inner: DrawPass::new(
+                ShaderHandleView::default(),
+                [],
+                [OutputObject::Color(source)],
+                |_, _| {},
+            ),
         }
     }
 
-    pub fn revalidate_source(&mut self, render_pool: &RenderPool) {
+    pub fn revalidate(&mut self, render_pool: &RenderPool) {
         self.source.revalidate(render_pool);
+        self.inner.revalidate(render_pool);
     }
 
     pub const fn source(&self) -> &RenderTargetAccessor {
@@ -744,28 +750,48 @@ impl BlitPass {
     }
 
     pub fn execute(&self, render_pool: &RenderPool) {
-        self.inner.execute(StorageSection::Front, render_pool, &());
-        let framebuffer = self.inner.framebuffer().unwrap();
-        framebuffer.set_read_buffer(Some(0));
+        if let Some(framebuffer) = self.inner.framebuffer() {
+            self.inner.execute(StorageSection::Front, render_pool, &());
+            framebuffer.set_read_buffer(Some(0));
 
-        let read_framebuffer = framebuffer.resource_id();
-        let (w, h) = self.source.texture.size();
+            let read_framebuffer = framebuffer.resource_id();
+            let (w, h) = self.source.texture.size();
 
-        unsafe {
-            janus::gl::BlitNamedFramebuffer(
-                read_framebuffer,
-                0,
-                0,
-                0,
-                w,
-                h,
-                0,
-                0,
-                w,
-                h,
-                janus::gl::COLOR_BUFFER_BIT,
-                janus::gl::NEAREST,
-            );
+            unsafe {
+                janus::gl::BlitNamedFramebuffer(
+                    read_framebuffer,
+                    0,
+                    0,
+                    0,
+                    w,
+                    h,
+                    0,
+                    0,
+                    w,
+                    h,
+                    janus::gl::COLOR_BUFFER_BIT,
+                    janus::gl::NEAREST,
+                );
+            }
+
+            if framebuffer.has_depth() {
+                unsafe {
+                    janus::gl::BlitNamedFramebuffer(
+                        read_framebuffer,
+                        0,
+                        0,
+                        0,
+                        w,
+                        h,
+                        0,
+                        0,
+                        w,
+                        h,
+                        janus::gl::DEPTH_BUFFER_BIT,
+                        janus::gl::NEAREST,
+                    );
+                }
+            }
         }
     }
 }
