@@ -427,8 +427,15 @@ impl OutputObject {
         }
     }
 
+    pub const fn accessor_mut(&mut self) -> &mut RenderTargetAccessor {
+        match self {
+            OutputObject::Color(render_target_accessor) => render_target_accessor,
+            OutputObject::Depth(render_target_accessor) => render_target_accessor,
+        }
+    }
+
     pub fn revalidate(&mut self, render_pool: &RenderPool) {
-        self.accessor().revalidate(render_pool);
+        self.accessor_mut().revalidate(render_pool);
     }
 
     pub const fn texture(&self) -> TextureView {
