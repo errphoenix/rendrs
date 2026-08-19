@@ -160,10 +160,7 @@ pub trait HasFramebuffer {
 
         let index = attachment_index.map_or(janus::gl::NONE, |i| janus::gl::COLOR_ATTACHMENT0 + i);
         unsafe {
-            janus::gl::NamedFramebufferDrawBuffer(
-                self.id().0,
-                janus::gl::COLOR_ATTACHMENT0 + index,
-            );
+            janus::gl::NamedFramebufferDrawBuffer(self.id().0, index);
         }
     }
 

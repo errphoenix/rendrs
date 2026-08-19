@@ -560,23 +560,25 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
                 .outputs
                 .iter()
                 .position(|output| matches!(output, OutputObject::Depth(_)));
+            let mut depth_output = None;
 
             if O > 0 {
                 if let Some(depth_i) = depth_i {
                     if O == 1 {
                         // no color attachments, the only output was depth
                         // default/null textures are ignored
+                        depth_output = Some(outputs[0]);
                         outputs = [TextureView::null(TextureKind::Dim2D); O];
                     } else {
                         // shift elements after depth to the left to preserve
                         // color outputs order, then set depth to null
+                        depth_output = Some(outputs[depth_i]);
                         outputs[depth_i..].rotate_left(1);
                         outputs[O - 1] = TextureView::null(TextureKind::Dim2D);
                     }
                 }
             }
 
-            let depth_output = depth_i.map(|i| outputs[i]);
             (outputs, fb_size, depth_output)
         };
 
