@@ -14,4 +14,4 @@ pub const BATCH_UNITS: usize = batch::PER_BATCH_UNITS;
 
 #[allow(unused)]
 #[cfg(feature = "pipeline")]
-pub use pipeline::BlitPass;
+pub use pipeline::{BlitPass, ClearPass, ComputePass, DrawPass, EmptyPassCtx};

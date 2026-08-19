@@ -709,49 +709,66 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
 }
 
 #[derive(Debug)]
-struct BlitPassCtx;
-impl CtxType for BlitPassCtx {
+pub struct EmptyPassCtx;
+impl CtxType for EmptyPassCtx {
     type Ctx<'ctx> = ();
 }
 
 #[derive(Debug)]
-pub struct BlitPass {
-    inner: DrawPass<BlitPassCtx, 0, 1>,
-    source: RenderTargetAccessor,
+pub struct ClearPass<const O: usize>(DrawPass<EmptyPassCtx, 0, O>);
+impl<const O: usize> ClearPass<O> {
+    pub fn new(outputs: [OutputObject; O]) -> Self {
+        Self(DrawPass::new(
+            ShaderHandleView::default(),
+            [],
+            outputs,
+            |_, _| {},
+        ))
+    }
 }
-impl BlitPass {
-    pub fn new(source: RenderTargetAccessor) -> Self {
-        Self {
-            source,
-            inner: DrawPass::new(
-                ShaderHandleView::default(),
-                [],
-                [OutputObject::Color(source)],
-                |_, _| {},
-            ),
-        }
+impl<const O: usize> Pass<EmptyPassCtx> for ClearPass<O> {
+    fn shader(&self) -> impl ShaderProgram {
+        ShaderHandleView::default()
     }
 
-    pub fn revalidate(&mut self, render_pool: &RenderPool) {
+    fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.0.revalidate(render_pool);
+    }
+
+    fn execute(&self, _: StorageSection, _: &RenderPool, _ctx: &()) {
+        if let Some(framebuffer) = self.0.framebuffer() {
+            framebuffer.bind();
+
+            let mut clear_mask = janus::gl::COLOR_BUFFER_BIT;
+            if framebuffer.has_depth() {
+                clear_mask |= janus::gl::DEPTH_BUFFER_BIT;
+            }
+
+            unsafe {
+                janus::gl::Clear(clear_mask);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BlitPass {
+    inner: DrawPass<EmptyPassCtx, 0, 1>,
+    source: RenderTargetAccessor,
+}
+impl Pass<EmptyPassCtx> for BlitPass {
+    fn shader(&self) -> impl ShaderProgram {
+        ShaderHandleView::default()
+    }
+
+    fn revalidate(&mut self, render_pool: &RenderPool) {
         self.source.revalidate(render_pool);
         self.inner.revalidate(render_pool);
     }
 
-    pub const fn source(&self) -> &RenderTargetAccessor {
-        &self.source
-    }
-
-    pub const fn source_mut(&mut self) -> &mut RenderTargetAccessor {
-        &mut self.source
-    }
-
-    pub const fn set_source(&mut self, source: RenderTargetAccessor) -> RenderTargetAccessor {
-        std::mem::replace(&mut self.source, source)
-    }
-
-    pub fn execute(&self, render_pool: &RenderPool) {
+    fn execute(&self, _: StorageSection, _: &RenderPool, _ctx: &()) {
         if let Some(framebuffer) = self.inner.framebuffer() {
-            self.inner.execute(StorageSection::Front, render_pool, &());
+            framebuffer.bind();
             framebuffer.set_read_buffer(Some(0));
 
             let read_framebuffer = framebuffer.resource_id();
@@ -793,5 +810,30 @@ impl BlitPass {
                 }
             }
         }
+    }
+}
+impl BlitPass {
+    pub fn new(source: RenderTargetAccessor) -> Self {
+        Self {
+            source,
+            inner: DrawPass::new(
+                ShaderHandleView::default(),
+                [],
+                [OutputObject::Color(source)],
+                |_, _| {},
+            ),
+        }
+    }
+
+    pub const fn source(&self) -> &RenderTargetAccessor {
+        &self.source
+    }
+
+    pub const fn source_mut(&mut self) -> &mut RenderTargetAccessor {
+        &mut self.source
+    }
+
+    pub const fn set_source(&mut self, source: RenderTargetAccessor) -> RenderTargetAccessor {
+        std::mem::replace(&mut self.source, source)
     }
 }
