@@ -496,6 +496,9 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
     }
 
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        if O == 0 {
+            return;
+        }
         if let Err(err) = self.revalidate_framebuffer(render_pool) {
             tracing::error!("failed to revalidate framebuffer: {err}");
         }

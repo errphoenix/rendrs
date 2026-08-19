@@ -11,3 +11,7 @@ pub mod pipeline;
 
 #[cfg(feature = "batching")]
 pub const BATCH_UNITS: usize = batch::PER_BATCH_UNITS;
+
+#[allow(unused)]
+#[cfg(feature = "pipeline")]
+pub use pipeline::BlitPass;
