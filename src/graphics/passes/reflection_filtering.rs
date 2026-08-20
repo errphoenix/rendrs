@@ -69,65 +69,58 @@ ethel::shader_glsl_compute! {
         };
 
         lib {
-            LIB_BSPLINE_SMOOTHING_JACOBIAN;
+            LIB_BSPLINE_JACOBIAN_WEIGHT;
             super::LIB_UTIL_CUBEMAP_UV;
         };
 
         src() {
             "
-            ivec2 dst_px = gl_GlobalInvocationID.xy;
-            uint face = gl_GlobalInvocationID.z;
+            ivec3 id = gl_GlobalInvocationID;
 
-            ivec2 sourceSize = textureSize(reference, mip_level - 1);
-            ivec2 dstSize    = sourceSize / 2;
+            int sourceSize = textureSize(reference, mip_level - 1).x;
+            int dstSize    = sourceSize / 2;
 
-            if (dst_px.x >= dstSize.x || dst_px.y >= dstSize.y) {
+            if (id.x >= dstSize || id.y >= dstSize) {
                 return;
             }
 
-            vec2 src_origin = vec2(dst_px * 2) + 1.0;
-            vec2 px0 = src_origin + vec2(-0.75, -0.75);
-            vec2 px1 = src_origin + vec2( 0.75, -0.75);
-            vec2 px2 = src_origin + vec2(-0.75,  0.75);
-            vec2 px3 = src_origin + vec2( 0.75,  0.75);
+            float inv_size = 1.0 / float(dstSize);
 
-            vec2 uv0 = (px0 / vec2(sourceSize)) * 2.0 - 1.0;
-            vec2 uv1 = (px1 / vec2(sourceSize)) * 2.0 - 1.0;
-            vec2 uv2 = (px2 / vec2(sourceSize)) * 2.0 - 1.0;
-            vec2 uv3 = (px3 / vec2(sourceSize)) * 2.0 - 1.0;
+            float u0 = (float(id.x) * 2.0 + 1.0 - 0.75) * inv_size - 1.0;
+            float u1 = (float(id.x) * 2.0 + 1.0 + 0.75) * inv_size - 1.0;
+            float v0 = (float(id.y) * 2.0 + 1.0 - 0.75) * -inv_size + 1.0;
+            float v1 = (float(id.y) * 2.0 + 1.0 + 0.75) * -inv_size + 1.0;
 
-            vec3 d0 = rendrs_CubemapUV(uv0, face);
-            vec3 d1 = rendrs_CubemapUV(uv1, face);
-            vec3 d2 = rendrs_CubemapUV(uv2, face);
-            vec3 d3 = rendrs_CubemapUV(uv3, face);
+            float w0 = rendrs_BSpline_Weight(vec2(u0, v0));
+            float w1 = rendrs_BSpline_Weight(vec2(u1, v0));
+            float w2 = rendrs_BSpline_Weight(vec2(u0, v1));
+            float w3 = rendrs_BSpline_Weight(vec2(u1, v1));
+            const float wsum = 0.5 / (w0+w1+w2+w3);
+            w0 = w0 * wsum + 0.125;
+            w1 = w1 * wsum + 0.125;
+            w2 = w2 * wsum + 0.125;
+            w3 = w3 * wsum + 0.125;
 
-            float mip = float(mip_level);
-            vec3 c0 = textureLod(reference, d0, mip).rgb;
-            vec3 c1 = textureLod(reference, d1, mip).rgb;
-            vec3 c2 = textureLod(reference, d2, mip).rgb;
-            vec3 c3 = textureLod(reference, d3, mip).rgb;
+            vec3 d0 = rendrs_CubemapUV(vec2(u0, v0), id.z);
+            vec3 d1 = rendrs_CubemapUV(vec2(u1, v0), id.z);
+            vec3 d2 = rendrs_CubemapUV(vec2(u0, v1), id.z);
+            vec3 d3 = rendrs_CubemapUV(vec2(u1, v1), id.z);
 
-            float w0 = rendrs_BSpline_smoothFactor(uv0);
-            float w1 = rendrs_BSpline_smoothFactor(uv1);
-            float w2 = rendrs_BSpline_smoothFactor(uv2);
-            float w3 = rendrs_BSpline_smoothFactor(uv3);
-            float wsum = w0+w1+w2+w3;
-            c0 *= w0;
-            c1 *= w1;
-            c2 *= w2;
-            c3 *= w3;
+            vec4 color = vec4(vec3(0.0), 1.0);
+            color.rgb += textureLod(reference, d0, mip_level).rgb * w0;
+            color.rgb += textureLod(reference, d1, mip_level).rgb * w1;
+            color.rgb += textureLod(reference, d2, mip_level).rgb * w2;
+            color.rgb += textureLod(reference, d3, mip_level).rgb * w3;
 
-            vec3 filtered_rgb = (c0 + c1 + c2 + c3) / wsum;
-            vec3 filtered     = vec4(filtered_rgb, 1.0);
-            imageStore(output, ivec3(ipx - 1, face), filtered);
+            imageStore(output, id, color);
             ";
         }
     }
 }
 
-/// B-spline smoothing Jacobian factor.
+/// B-spline smoothing Jacobian weight.
 ///
-/// Creates the `rendrs_BSpline_smoothFactor` function, which takes in a 2d vector
+/// Creates the `rendrs_BSpline_Weight` function, which takes in a 2d vector
 /// representing a 2d coordinate, returning the smoothing factor as a scalar
 /// float value.
 ///
@@ -136,12 +129,11 @@ ethel::shader_glsl_compute! {
 /// 0.5 * (1.0 + J(x,y))
 /// ```
 /// where `J(x,y)` is the smoothing Jacobian factor before further smoothing.
-pub const LIB_BSPLINE_SMOOTHING_JACOBIAN: GlslLib = ethel::shader_glsl_lib! {
-    float rendrs_BSpline_smoothFactor[
+pub const LIB_BSPLINE_JACOBIAN_WEIGHT: GlslLib = ethel::shader_glsl_lib! {
+    float rendrs_BSpline_Weight[
         p : vec2
     ] => "
         float sq = p.x*p.x + p.y*p.y + 1.0;
-        float J  = pow(sq, -1.5);
-        return 0.5 * (1.0 + J);
+        return sq*sqrt(sq);
     "
 };
