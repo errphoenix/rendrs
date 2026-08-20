@@ -1,6 +1,13 @@
 pub mod light;
 pub mod material;
 
+#[cfg(feature = "pipeline")]
+pub mod passes;
+
+#[allow(unused_imports)]
+#[cfg(feature = "pipeline")]
+pub use passes::LIB_UTIL_CUBEMAP_UV;
+
 use ethel::render::buffer::{TriBuffer, View, ViewMut};
 #[allow(unused_imports)]
 pub use light::{Light, LightParams};
