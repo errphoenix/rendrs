@@ -1,20 +1,71 @@
 use ethel::shader::GlslLib;
+use janus::texture::{MipLevels, Tex, TextureView};
+
+use crate::{
+    ComputePass,
+    pipeline::{ImageAccessKind, ImageObject, ImageObjectTarget, SamplerObject},
+};
+
+pub type BSplineDownscalePass = ComputePass<BSplineDownscaleCtxWrapper, 0, 0>;
+
+#[derive(Debug)]
+pub struct BSplineDownscaleCtx<'ctx> {
+    pub shader: &'ctx ComputeShaderBSplineDownscale,
+    pub target: TextureView,
+    /// Mip-level index to compute
+    pub mip_level: MipLevels,
+}
+crate::context_wrapper!(for<'ctx> BSplineDownscaleCtx);
+
+pub const fn pass(shader: &ComputeShaderBSplineDownscale) -> BSplineDownscalePass {
+    let handle_view = shader.compute_handle().view();
+    BSplineDownscalePass::new(handle_view, [], [], |_, ctx| {
+        let BSplineDownscaleCtx {
+            shader,
+            target,
+            mip_level,
+        } = ctx;
+
+        let mip_level = mip_level.get();
+        shader.uniform_mip_level_intv([mip_level]);
+
+        let target = *target;
+        let input = SamplerObject::with_mip_view(target, mip_level);
+        let output = ImageObjectTarget::with_mip_level(
+            ImageObject::DirectTexture(target),
+            ImageAccessKind::WriteOnly,
+            DOWNSCALE_IMAGE_BINDING_OUTPUT,
+            None,
+            mip_level,
+        );
+
+        input.bind(0);
+        output.bind();
+
+        let (w, h) = target.size();
+        let wg_x = (w as u32).div_ceil(WORKSPACE_SIZE_XY);
+        let wg_y = (h as u32).div_ceil(WORKSPACE_SIZE_XY);
+        [wg_x, wg_y, 1]
+    })
+}
 
 /// The image binding index for the output texture to write the mipmap to.
 ///
 /// Tip: use `glBindImageTexture`'s `level` field to specify the mip.
-pub const IMAGE_BINDING_OUTPUT: u32 = 0;
+pub const DOWNSCALE_IMAGE_BINDING_OUTPUT: u32 = 0;
+pub const WORKSPACE_SIZE_XY: u32 = 8;
 
 ethel::shader_glsl_compute! {
     struct BSplineDownscale > [460] {
         workgroup [8, 8, 6];
 
         uniform {
-            length 1, mip_level : uint        => u32;
+            // mip level being computed (never 0)
+            length 1, mip_level : int         => i32;
             length 1, reference : samplerCube => i32;
         };
         image {
-            on IMAGE_BINDING_OUTPUT => output : imageCube as rgba16f;
+            on DOWNSCALE_IMAGE_BINDING_OUTPUT => output : imageCube as rgba16f;
         };
 
         lib {
@@ -27,7 +78,7 @@ ethel::shader_glsl_compute! {
             ivec2 dst_px = gl_GlobalInvocationID.xy;
             uint face = gl_GlobalInvocationID.z;
 
-            ivec2 sourceSize = textureSize(reference, mip_level);
+            ivec2 sourceSize = textureSize(reference, mip_level - 1);
             ivec2 dstSize    = sourceSize / 2;
 
             if (dst_px.x >= dstSize.x || dst_px.y >= dstSize.y) {

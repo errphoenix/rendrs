@@ -234,15 +234,15 @@ pub struct ImageObjectTarget {
     object: ImageObject,
     access: ImageAccessKind,
     unit: u32,
-    layer: Option<u32>,
-    mip_level: Option<u32>,
+    layer: Option<i32>,
+    mip_level: Option<i32>,
 }
 impl ImageObjectTarget {
     pub const fn new(
         object: ImageObject,
         access: ImageAccessKind,
         unit: u32,
-        layer: Option<u32>,
+        layer: Option<i32>,
     ) -> Self {
         Self {
             object,
@@ -257,8 +257,8 @@ impl ImageObjectTarget {
         object: ImageObject,
         access: ImageAccessKind,
         unit: u32,
-        layer: Option<u32>,
-        mip_level: u32,
+        layer: Option<i32>,
+        mip_level: i32,
     ) -> Self {
         Self {
             object,
@@ -305,12 +305,16 @@ impl ImageObjectTarget {
         self.unit
     }
 
-    pub const fn layer(&self) -> Option<u32> {
+    pub const fn layer(&self) -> Option<i32> {
         self.layer
     }
 
     pub const fn is_layer(&self) -> bool {
         self.layer.is_some()
+    }
+
+    pub const fn mip_level(&self) -> Option<i32> {
+        self.mip_level
     }
 
     pub fn bind(&self) {
@@ -376,11 +380,12 @@ impl ImageObject {
         &self,
         unit: u32,
         access: ImageAccessKind,
-        layer: Option<u32>,
-        mip_level: Option<u32>,
+        layer: Option<i32>,
+        mip_level: Option<i32>,
     ) {
         let layered = layer.is_none() as u8;
-        let layer = layer.unwrap_or_default() as i32;
+        let layer = layer.unwrap_or_default();
+        let mip_level = mip_level.unwrap_or_default();
         let texture = self.texture().texture_id();
         let access = access.property_enum();
         let format = self.texture().metadata().internal_format();
@@ -388,7 +393,7 @@ impl ImageObject {
             janus::gl::BindImageTexture(
                 unit,
                 texture,
-                mip_level.unwrap_or_default() as i32,
+                mip_level,
                 layered,
                 layer,
                 access,
@@ -418,7 +423,7 @@ impl janus::GlProperty for ImageAccessKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SamplerObject {
     inner: TextureView,
-    mip_level: Option<u32>,
+    mip_level: Option<i32>,
 }
 impl SamplerObject {
     pub fn from_texture(texture: impl Into<TextureView>) -> Self {
@@ -432,7 +437,7 @@ impl SamplerObject {
         }
     }
 
-    pub const fn with_mip_view(texture: TextureView, mip_view: u32) -> Self {
+    pub const fn with_mip_view(texture: TextureView, mip_view: i32) -> Self {
         Self {
             inner: texture,
             mip_level: Some(mip_view),
@@ -444,13 +449,18 @@ impl SamplerObject {
     }
 
     /// The forced mip-level view, applied before sampling.
-    pub const fn mip_view(&self) -> Option<u32> {
+    pub const fn mip_view(&self) -> Option<i32> {
         self.mip_level
+    }
+
+    pub fn bind(&self, unit: u32) {
+        self.set_mip_view();
+        self.inner.bind(unit);
     }
 
     fn set_mip_view(&self) {
         if let Some(mip) = self.mip_level {
-            self.inner.set_mip_level_only(mip as i32);
+            self.inner.set_mip_level_only(mip);
         }
     }
 
@@ -653,9 +663,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
     pub fn bind_samplers(&self) {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
-            let texture = sampler.texture();
-            sampler.set_mip_view();
-            texture.bind(unit);
+            sampler.bind(unit);
         });
     }
 
@@ -744,9 +752,7 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     pub fn bind_samplers(&self) {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
-            let texture = sampler.texture();
-            sampler.set_mip_view();
-            texture.bind(unit);
+            sampler.bind(unit);
         });
     }
 
