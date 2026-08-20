@@ -235,6 +235,7 @@ pub struct ImageObjectTarget {
     access: ImageAccessKind,
     unit: u32,
     layer: Option<u32>,
+    mip_level: Option<u32>,
 }
 impl ImageObjectTarget {
     pub const fn new(
@@ -248,6 +249,23 @@ impl ImageObjectTarget {
             access,
             unit,
             layer,
+            mip_level: None,
+        }
+    }
+
+    pub const fn with_mip_level(
+        object: ImageObject,
+        access: ImageAccessKind,
+        unit: u32,
+        layer: Option<u32>,
+        mip_level: u32,
+    ) -> Self {
+        Self {
+            object,
+            access,
+            unit,
+            layer,
+            mip_level: Some(mip_level),
         }
     }
 
@@ -296,7 +314,8 @@ impl ImageObjectTarget {
     }
 
     pub fn bind(&self) {
-        self.object.bind(self.unit, self.layer, self.access);
+        self.object
+            .bind(self.unit, self.access, self.layer, self.mip_level);
     }
 }
 
@@ -353,7 +372,13 @@ impl ImageObject {
         }
     }
 
-    pub fn bind(&self, unit: u32, layer: Option<u32>, access: ImageAccessKind) {
+    pub fn bind(
+        &self,
+        unit: u32,
+        access: ImageAccessKind,
+        layer: Option<u32>,
+        mip_level: Option<u32>,
+    ) {
         let layered = layer.is_none() as u8;
         let layer = layer.unwrap_or_default() as i32;
         let texture = self.texture().texture_id();
@@ -363,7 +388,7 @@ impl ImageObject {
             janus::gl::BindImageTexture(
                 unit,
                 texture,
-                0,
+                mip_level.unwrap_or_default() as i32,
                 layered,
                 layer,
                 access,
@@ -391,18 +416,48 @@ impl janus::GlProperty for ImageAccessKind {
 
 /// An uniform sampler object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SamplerObject(TextureView);
+pub struct SamplerObject {
+    inner: TextureView,
+    mip_level: Option<u32>,
+}
 impl SamplerObject {
     pub fn from_texture(texture: impl Into<TextureView>) -> Self {
-        Self(texture.into())
+        Self::new(texture.into())
     }
 
     pub const fn new(texture: TextureView) -> Self {
-        Self(texture)
+        Self {
+            inner: texture,
+            mip_level: None,
+        }
+    }
+
+    pub const fn with_mip_view(texture: TextureView, mip_view: u32) -> Self {
+        Self {
+            inner: texture,
+            mip_level: Some(mip_view),
+        }
     }
 
     pub const fn texture(&self) -> TextureView {
-        self.0
+        self.inner
+    }
+
+    /// The forced mip-level view, applied before sampling.
+    pub const fn mip_view(&self) -> Option<u32> {
+        self.mip_level
+    }
+
+    fn set_mip_view(&self) {
+        if let Some(mip) = self.mip_level {
+            self.inner.set_mip_level_only(mip as i32);
+        }
+    }
+
+    fn restore_mips(&self) {
+        if self.mip_level.is_some() {
+            self.inner.set_mip_level_unbound();
+        }
     }
 }
 
@@ -516,6 +571,7 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
         self.bind_samplers();
         self.bind_framebuffer();
         (self.dispatch)(frame_index, ctx);
+        self.restore_samplers_mips();
     }
 }
 impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
@@ -598,8 +654,13 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
             let texture = sampler.texture();
+            sampler.set_mip_view();
             texture.bind(unit);
         });
+    }
+
+    fn restore_samplers_mips(&self) {
+        self.samplers.iter().for_each(SamplerObject::restore_mips);
     }
 
     pub const fn samplers(&self) -> &[SamplerObject; S] {
@@ -662,6 +723,7 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
         self.bind_images();
         let workgroups = (self.pre_dispatch)(frame_index, ctx);
         self.shader.dispatch_compute(workgroups);
+        self.restore_samplers_mips();
     }
 }
 impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
@@ -683,8 +745,13 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
         self.samplers.iter().enumerate().for_each(|(i, sampler)| {
             let unit = i as u32;
             let texture = sampler.texture();
+            sampler.set_mip_view();
             texture.bind(unit);
         });
+    }
+
+    fn restore_samplers_mips(&self) {
+        self.samplers.iter().for_each(SamplerObject::restore_mips);
     }
 
     pub const fn samplers(&self) -> &[SamplerObject; S] {
