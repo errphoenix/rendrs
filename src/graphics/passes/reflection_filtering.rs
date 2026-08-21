@@ -2,6 +2,7 @@ use ethel::shader::Constant;
 use ethel::shader::GlslLib;
 use janus::texture::{MipLevels, Tex, TextureView};
 
+use crate::pipeline::CtxType;
 use crate::{
     ComputePass,
     pipeline::{ImageAccessKind, ImageObject, ImageObjectTarget, SamplerObject},
@@ -18,7 +19,7 @@ pub struct BSplineDownscaleCtx<'ctx> {
 }
 crate::context_wrapper!(for<'ctx> BSplineDownscaleCtx);
 
-pub const fn pass(shader: &ComputeShaderBSplineDownscale) -> BSplineDownscalePass {
+pub const fn rf_bspline_downsample(shader: &ComputeShaderBSplineDownscale) -> BSplineDownscalePass {
     let handle_view = shader.compute_handle().view();
     BSplineDownscalePass::new(handle_view, [], [], |_, ctx| {
         let BSplineDownscaleCtx {
@@ -140,6 +141,67 @@ pub const LIB_BSPLINE_JACOBIAN_WEIGHT: GlslLib = ethel::shader_glsl_lib! {
     "
 };
 
+pub type PrefilterCubemapPass = ComputePass<PrefilterCubemapCtx, 1, 5>;
+
+#[derive(Debug)]
+pub struct PrefilterCubemapCtx {
+    res_chain: [u32; FILTERING_MIP_COUNT as usize],
+    total_pixels: u32,
+}
+impl PrefilterCubemapCtx {
+    pub const fn new(base_resolution: u32) -> Self {
+        let mut total_pixels = 0;
+        let mut res_chain = [0u32; FILTERING_MIP_COUNT as usize];
+        let mut i = 0;
+        while i < FILTERING_MIP_COUNT {
+            let resi = base_resolution >> i;
+            total_pixels += resi * resi;
+            res_chain[i as usize] = resi;
+            i += 1;
+        }
+        Self {
+            res_chain,
+            total_pixels,
+        }
+    }
+
+    pub const fn total_mip_pixels(&self) -> u32 {
+        self.total_pixels
+    }
+
+    pub const fn mip_resolution_chain(&self) -> [u32; FILTERING_MIP_COUNT as usize] {
+        self.res_chain
+    }
+
+    pub const fn base_resolution(&self) -> u32 {
+        self.res_chain[0]
+    }
+}
+impl CtxType for PrefilterCubemapCtx {
+    type Ctx<'ctx> = Self;
+}
+
+pub const fn rf_prefilter_cubemap(
+    shader: &ComputeShaderPrefilterCubemap,
+    source_sampler: TextureView,
+    output: TextureView,
+) -> PrefilterCubemapPass {
+    let handle_view = shader.compute_handle().view();
+    let sampler = SamplerObject::new(source_sampler);
+    let image = ImageObject::DirectTexture(output);
+    let outputs = ImageObjectTarget::from_texture_mips::<{ FILTERING_MIP_COUNT as usize }>(
+        image,
+        ImageAccessKind::WriteOnly,
+        IMAGE_BINDING_FILTERMIPS_MIP0,
+        None,
+        0,
+    );
+    PrefilterCubemapPass::new(handle_view, [sampler], outputs, |_, ctx| {
+        let wg_size = ctx.total_pixels.div_ceil(WORKSPACE_SIZE_XY);
+        [wg_size, 6, 1]
+    })
+}
+
 pub const IMAGE_BINDING_FILTERMIPS_MIP0: u32 = 0;
 pub const IMAGE_BINDING_FILTERMIPS_MIP1: u32 = 1;
 pub const IMAGE_BINDING_FILTERMIPS_MIP2: u32 = 2;
@@ -150,10 +212,11 @@ pub const IMAGE_BINDING_FILTERMIPS_MIP4: u32 = 4;
 //       instead of dispatching per-probe like downsampling pass.
 //       unlike downsampling, there is no (mip) dependency chain.
 ethel::shader_glsl_compute! {
-    struct FilterMips > [460] {
+    struct PrefilterCubemap > [460] {
         workgroup [64, 1, 1];
 
         uniform {
+            // resolution of mip 0 / aka probe reflection map res
             length 1, base_resolution : uint        => u32;
             length 1, input_cubemap   : samplerCube => i32;
         };

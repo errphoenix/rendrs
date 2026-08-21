@@ -80,7 +80,7 @@ pub const LIB_UTIL_HAMMERSLEY_2D: GlslLib = ethel::shader_glsl_lib! {
     "
 };
 
-/// GGX importance sampling.
+/// Importance sampling mapping according to a GGX specular lobe.
 ///
 /// Creates the `rendrs_GGX_ImportanceSample` function, which takes the
 /// following arguments:

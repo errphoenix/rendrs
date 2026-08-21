@@ -245,6 +245,24 @@ pub struct ImageObjectTarget {
     mip_level: Option<i32>,
 }
 impl ImageObjectTarget {
+    pub const fn from_texture_mips<const MIPS: usize>(
+        target: ImageObject,
+        access: ImageAccessKind,
+        base_unit: u32,
+        layer: Option<i32>,
+        base_mip: i32,
+    ) -> [Self; MIPS] {
+        let base = Self::with_mip_level(target, access, base_unit, layer, base_mip);
+        let mut outputs = [base; MIPS];
+        let mut i = 1;
+        while i < MIPS {
+            outputs[i].unit += i as u32;
+            outputs[i].mip_level = Some(base_mip + i as i32);
+            i += 1;
+        }
+        outputs
+    }
+
     pub const fn new(
         object: ImageObject,
         access: ImageAccessKind,
