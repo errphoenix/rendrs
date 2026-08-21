@@ -1,5 +1,6 @@
 use ethel::shader::GlslLib;
 
+pub mod brdf_bake_specular;
 pub mod reflection_filtering;
 
 /// Utility function for cubemap UV conversion.

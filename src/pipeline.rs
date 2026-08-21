@@ -172,6 +172,13 @@ pub struct RenderPool {
     targets: Vec<RenderTarget>,
 }
 impl RenderPool {
+    /// does not allocate
+    pub fn dummy() -> Self {
+        Self {
+            targets: Vec::new(),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             targets: Vec::new(),

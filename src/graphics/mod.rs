@@ -6,7 +6,7 @@ pub mod passes;
 
 #[allow(unused_imports)]
 #[cfg(feature = "pipeline")]
-pub use passes::LIB_UTIL_CUBEMAP_UV;
+pub use passes::*;
 
 use ethel::render::buffer::{TriBuffer, View, ViewMut};
 #[allow(unused_imports)]
