@@ -10,8 +10,10 @@ pub mod reflection_filtering;
 ///   coordinate system.
 /// * the face index of the cubemap as an unsigned integer ranging from 0 to 5
 ///
-/// Returns a 3d unit vector representing the direction from the origin (the
+/// Returns a 3d vector representing the direction from the origin (the
 /// center of the cubemap) to the texel at the given UV on the given face.
+///
+/// The returned vector is not normalized, as OpenGL does not require this.
 ///
 /// The returned vector can be used directly to sample a cubemap.
 pub const LIB_UTIL_CUBEMAP_UV: GlslLib = ethel::shader_glsl_lib! {
@@ -40,6 +42,6 @@ pub const LIB_UTIL_CUBEMAP_UV: GlslLib = ethel::shader_glsl_lib! {
                 dir = vec3(-u, -v, -1.0);
                 break;
         }
-        return normalize(dir);
+        return dir;
     "
 };

@@ -2,22 +2,22 @@ use ethel::shader::{Constant, GlslLib, GlslStruct};
 
 ethel::shader_glsl_struct! {
     struct Light {
-        pos_x: f32 => float;
-        pos_y: f32 => float;
-        pos_z: f32 => float;
-        dir_x: f32 => float;
-        dir_y: f32 => float;
-        dir_z: f32 => float;
-        col_r: f32 => float;
-        col_g: f32 => float;
-        col_b: f32 => float;
-        intensity: f32 => float;
-        falloff_exp: f32 => float;
-        _pad: f32 => float;
-        omni_max_radius: f32 => float;
-        spot_inner_size: f32 => float;
-        spot_outer_size: f32 => float;
-        kind_flag: f32 => float;
+        pos_x: f32 => float,
+        pos_y: f32 => float,
+        pos_z: f32 => float,
+        dir_x: f32 => float,
+        dir_y: f32 => float,
+        dir_z: f32 => float,
+        col_r: f32 => float,
+        col_g: f32 => float,
+        col_b: f32 => float,
+        intensity: f32 => float,
+        falloff_exp: f32 => float,
+        _pad: f32 => float,
+        omni_max_radius: f32 => float,
+        spot_inner_size: f32 => float,
+        spot_outer_size: f32 => float,
+        kind_flag: f32 => float
     }
 }
 

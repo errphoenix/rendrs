@@ -37,16 +37,16 @@ pub const TYPE_MATERIAL_LOCATION: GlslStruct = MaterialLocationGlslStruct::as_de
 
 ethel::shader_glsl_struct! {
     struct MaterialEntryLocation {
-        inner: u32 => uint;
+        inner: u32 => uint
     }
 }
 
 ethel::shader_glsl_struct! {
     struct MaterialLocation {
-        diffuse_and_alpha: MaterialEntryLocation => MaterialEntryLocation;
-        normal_and_emissive: MaterialEntryLocation => MaterialEntryLocation;
-        ormd: MaterialEntryLocation => MaterialEntryLocation;
-        width: f32 => float;
-        height: f32 => float;
+        diffuse_and_alpha: MaterialEntryLocation => MaterialEntryLocation,
+        normal_and_emissive: MaterialEntryLocation => MaterialEntryLocation,
+        ormd: MaterialEntryLocation => MaterialEntryLocation,
+        width: f32 => float,
+        height: f32 => float
     }
 }
