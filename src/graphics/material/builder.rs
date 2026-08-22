@@ -281,7 +281,12 @@ impl MaterialGroupDescriptor {
                             cache,
                             texture_registry,
                             size as u32,
-                            &fallback_sc_black,
+                            [
+                                &fallback_sc_white,
+                                &fallback_sc_white,
+                                &fallback_sc_black,
+                                &fallback_sc_black,
+                            ],
                             &mut image_load_buffer,
                         );
                     }
@@ -571,7 +576,7 @@ fn build_4a(
     cache: &mut MaterialEntryCache,
     texture_registry: &mut AssetRegistry<RawTexture, TextureMetadata>,
     max_size: u32,
-    fallback: &[u8],
+    fallbacks: [&[u8]; 4],
     coal_buffer: &mut Vec<u8>,
 ) {
     let r = r.map(|src| src.load(texture_registry));
@@ -601,16 +606,16 @@ fn build_4a(
 
     let r = r
         .as_ref()
-        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+        .map_or(&fallbacks[0][..known_len], |src| src.0.as_bytes());
     let g = g
         .as_ref()
-        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+        .map_or(&fallbacks[1][..known_len], |src| src.0.as_bytes());
     let b = b
         .as_ref()
-        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+        .map_or(&fallbacks[2][..known_len], |src| src.0.as_bytes());
     let a = a
         .as_ref()
-        .map_or(&fallback[..known_len], |src| src.0.as_bytes());
+        .map_or(&fallbacks[3][..known_len], |src| src.0.as_bytes());
     coalesce_image_4a(r, g, b, a, coal_buffer);
 
     cache.norm_sub_width = width as f32 / max_size as f32;
