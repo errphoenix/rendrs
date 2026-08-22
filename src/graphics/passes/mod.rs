@@ -22,6 +22,8 @@ pub const LIB_UTIL_CUBEMAP_UV: GlslLib = ethel::shader_glsl_lib! {
         uv   : vec2,
         face : uint
     ] => "
+        float u = uv.x;
+        float v = uv.y;
         vec3 dir;
         switch(face) {
             case 0:
@@ -110,7 +112,7 @@ pub const LIB_GGX_IMPSAMPLE: GlslLib = ethel::shader_glsl_lib! {
         vec3 tangent = normalize(cross(up, normal));
         vec3 bitangent = cross(normal, tangent);
 
-        vec3 sample = tangent * H.x + bitangent * H.y + normal * H.z;
+        return tangent * H.x + bitangent * H.y + normal * H.z;
     "
 };
 

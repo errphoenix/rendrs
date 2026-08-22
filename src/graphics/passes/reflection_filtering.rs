@@ -11,28 +11,25 @@ use crate::{
 pub type BSplineDownscalePass = ComputePass<BSplineDownscaleCtxWrapper, 0, 0>;
 
 #[derive(Debug)]
-pub struct BSplineDownscaleCtx<'ctx> {
-    pub shader: &'ctx ComputeShaderBSplineDownscale,
+pub struct BSplineDownscaleCtx {
+    /// Acts as both input and output
     pub target: TextureView,
     /// Mip-level index to compute
+    ///
+    /// fetches `mip_level - 1` and writes to `mip_level`
     pub mip_level: MipLevels,
 }
-crate::context_wrapper!(for<'ctx> BSplineDownscaleCtx);
+crate::context_wrapper!(BSplineDownscaleCtx);
 
 pub const fn rf_bspline_downsample(shader: &ComputeShaderBSplineDownscale) -> BSplineDownscalePass {
     let handle_view = shader.compute_handle().view();
     BSplineDownscalePass::new(handle_view, [], [], |_, ctx| {
-        let BSplineDownscaleCtx {
-            shader,
-            target,
-            mip_level,
-        } = ctx;
+        let BSplineDownscaleCtx { target, mip_level } = ctx;
 
         let mip_level = mip_level.get();
-        shader.uniform_mip_level_intv([mip_level]);
 
         let target = *target;
-        let input = SamplerObject::with_mip_view(target, mip_level);
+        let input = SamplerObject::with_mip_view(target, mip_level - 1);
         let output = ImageObjectTarget::with_mip_level(
             ImageObject::DirectTexture(target),
             ImageAccessKind::WriteOnly,
@@ -63,12 +60,10 @@ ethel::shader_glsl_compute! {
         workgroup [8, 8, 6];
 
         uniform {
-            // mip level being computed (never 0)
-            length 1, mip_level : int         => i32;
             length 1, reference : samplerCube => i32;
         };
         image {
-            on DOWNSCALE_IMAGE_BINDING_OUTPUT => output : imageCube as rgba16f writeonly;
+            on DOWNSCALE_IMAGE_BINDING_OUTPUT => out_filtered : imageCube as rgba16f writeonly;
         };
 
         lib {
@@ -78,9 +73,9 @@ ethel::shader_glsl_compute! {
 
         src() {
             "
-            ivec3 id = gl_GlobalInvocationID;
+            uvec3 id = gl_GlobalInvocationID;
 
-            int sourceSize = textureSize(reference, mip_level - 1).x;
+            int sourceSize = textureSize(reference, 0).x;
             int dstSize    = sourceSize / 2;
 
             if (id.x >= dstSize || id.y >= dstSize) {
@@ -110,12 +105,12 @@ ethel::shader_glsl_compute! {
             vec3 d3 = rendrs_CubemapUV(vec2(u1, v1), id.z);
 
             vec4 color = vec4(vec3(0.0), 1.0);
-            color.rgb += textureLod(reference, d0, mip_level).rgb * w0;
-            color.rgb += textureLod(reference, d1, mip_level).rgb * w1;
-            color.rgb += textureLod(reference, d2, mip_level).rgb * w2;
-            color.rgb += textureLod(reference, d3, mip_level).rgb * w3;
+            color.rgb += textureLod(reference, d0, 0).rgb * w0;
+            color.rgb += textureLod(reference, d1, 0).rgb * w1;
+            color.rgb += textureLod(reference, d2, 0).rgb * w2;
+            color.rgb += textureLod(reference, d3, 0).rgb * w3;
 
-            imageStore(output, id, color);
+            imageStore(out_filtered, ivec3(id), color);
             ";
         }
     }
@@ -217,7 +212,6 @@ ethel::shader_glsl_compute! {
 
         uniform {
             // resolution of mip 0 / aka probe reflection map res
-            length 1, base_resolution : uint        => u32;
             length 1, input_cubemap   : samplerCube => i32;
         };
         image {
@@ -250,25 +244,26 @@ ethel::shader_glsl_compute! {
             // id.x = output texel x
             // id.y = output texel y
             // id.z = face index
-            ivec3 id = gl_GlobalInvocationID;
+            ivec3 id = ivec3(gl_GlobalInvocationID);
 
-            const MipSizes mip_hsizes = __helper_Mip_hsizes(base_resolution);
+            int base_resolution = textureSize(input_cubemap, 0).x;
+            const MipSizes mip_hsizes = _helper_Mip_hsizes(base_resolution);
 
             uint level = 0;
-            if (id.x < mip_hsizes[0]) {
+            if (id.x < mip_hsizes.size_0) {
                 level = 0;
-            } else if (id.x < mip_hsizes[1]) {
+            } else if (id.x < mip_hsizes.size_1) {
                 level = 1;
-                id.x -= mip_hsizes[0];
-            } else if (id.x < mip_hsizes[2]) {
+                id.x -= mip_hsizes.size_0;
+            } else if (id.x < mip_hsizes.size_2) {
                 level = 2;
-                id.x -= mip_hsizes[1];
-            } else if (id.x < mip_hsizes[3]) {
+                id.x -= mip_hsizes.size_1;
+            } else if (id.x < mip_hsizes.size_3) {
                 level = 3;
-                id.x -= mip_hsizes[2];
-            } else if (id.x < mip_hsizes[4]) {
+                id.x -= mip_hsizes.size_2;
+            } else if (id.x < mip_hsizes.size_4) {
                 level = 4;
-                id.x -= mip_hsizes[3];
+                id.x -= mip_hsizes.size_3;
             } else {
                 return;
             }
@@ -289,7 +284,7 @@ ethel::shader_glsl_compute! {
             vec3 frameZ = normalize(dir);
             vec3 adir = abs(dir);
 
-            vec4 color = vec4(0.0):
+            vec4 color = vec4(0.0);
             for (int axis = 0; axis < 3; axis++) {
                 const int otherAxis0 = 1 - (axis & 1) - (axis >> 1);
                 const int otherAxis1 = 2 - (axis >> 1);
@@ -347,13 +342,13 @@ ethel::shader_glsl_compute! {
                     float theta2 = theta*theta;
                     float phi2   = phi*phi;
 
-                    for (int iSuperTap = 0; iSupeTap < NUM_TAPS / 4; iSuperTap++) {
+                    for (int iSuperTap = 0; iSuperTap < NUM_TAPS / 4; iSuperTap++) {
                         const int index = (NUM_TAPS / 4) * axis + iSuperTap;
-                        vec4 coeffsDir0[3];
-                        vec4 coeffsDir1[3];
-                        vec4 coeffsDir2[3];
-                        vec4 coeffsLevel[3];
-                        vec4 coeffsWeight[3];
+                        float[4] coeffsDir0[3];
+                        float[4] coeffsDir1[3];
+                        float[4] coeffsDir2[3];
+                        float[4] coeffsLevel[3];
+                        float[4] coeffsWeight[3];
 
                         for (int iCoeff = 0; iCoeff < 3; iCoeff++) {
                             coeffsDir0[iCoeff] = coeffs_quad32[level][0][iCoeff][index];
@@ -364,20 +359,20 @@ ethel::shader_glsl_compute! {
                         }
                         for (int iSubTap = 0; iSubTap < 4; iSubTap++) {
                             vec3 sample_dir
-                            = frameX * (coeffsDir0[0][iSubTap] + coeffsDir0[1][iSubTap]) * theta2 + coeffsDir0[2][iSubTap] * phi2)
-                            + frameY * (coeffsDir1[0][iSubTap] + coeffsDir1[1][iSubTap]) * theta2 + coeffsDir1[2][iSubTap] * phi2)
-                            + frameZ * (coeffsDir2[0][iSubTap] + coeffsDir2[1][iSubTap]) * theta2 + coeffsDir2[2][iSubTap] * phi2);
+                            = frameX * (coeffsDir0[0][iSubTap] + coeffsDir0[1][iSubTap] * theta2 + coeffsDir0[2][iSubTap] * phi2)
+                            + frameY * (coeffsDir1[0][iSubTap] + coeffsDir1[1][iSubTap] * theta2 + coeffsDir1[2][iSubTap] * phi2)
+                            + frameZ * (coeffsDir2[0][iSubTap] + coeffsDir2[1][iSubTap] * theta2 + coeffsDir2[2][iSubTap] * phi2);
 
-                            float sample_level = coeffsLevel[0][iSubTap] + coeffsLevel[1][iSubTap] * theta2 + coeffsLevel[2][iSubTap * phi2;
-                            float sample_weight = coeffsWeight[0][iSubTap] + coeffsWeight[1][iSubTap] * theta2 + coeffsWeight[2][iSubTap * phi2;
+                            float sample_level = coeffsLevel[0][iSubTap] + coeffsLevel[1][iSubTap] * theta2 + coeffsLevel[2][iSubTap] * phi2;
+                            float sample_weight = coeffsWeight[0][iSubTap] + coeffsWeight[1][iSubTap] * theta2 + coeffsWeight[2][iSubTap] * phi2;
                             sample_weight *= frameweight;
 
                             // compensate for jacobian
-                            sample_dir /= max(abs(sample_dir.x, max(sample_dir.y, sample_dir.z)));
+                            sample_dir /= max(abs(sample_dir.x), max(sample_dir.y, sample_dir.z));
                             sample_level += 0.75 * log(dot(sample_dir,sample_dir));
 
                             color.rgb += textureLod(input_cubemap, sample_dir, sample_level).rgb * sample_weight;
-                            color.a   += sampe_weight;
+                            color.a   += sample_weight;
                         }
                     }
                 }
@@ -413,23 +408,23 @@ ethel::shader_glsl_compute! {
 
 ethel::shader_glsl_struct! {
     struct MipSizes {
-        size_0 : u32 => uint,
-        size_1 : u32 => uint,
-        size_2 : u32 => uint,
-        size_3 : u32 => uint,
-        size_4 : u32 => uint
+        size_0 : i32 => int,
+        size_1 : i32 => int,
+        size_2 : i32 => int,
+        size_3 : i32 => int,
+        size_4 : i32 => int
     }
 }
 
 const LIB_HELPER_MIP_HSIZES: GlslLib = ethel::shader_glsl_lib! {
-    MipSizes __helper_Mip_hsizes[
-        base_mip_size : uint
+    MipSizes _helper_Mip_hsizes[
+        base_mip_size : int
     ] => "
-        uint s0 = base_mip_size >> 0;
-        uint s1 = base_mip_size >> 1;
-        uint s2 = base_mip_size >> 2;
-        uint s3 = base_mip_size >> 3;
-        uint s4 = base_mip_size >> 4;
+        int s0 = base_mip_size >> 0;
+        int s1 = base_mip_size >> 1;
+        int s2 = base_mip_size >> 2;
+        int s3 = base_mip_size >> 3;
+        int s4 = base_mip_size >> 4;
         return MipSizes(
             s0*s0,
             s0*s0+s1*s1,

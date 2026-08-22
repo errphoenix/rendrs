@@ -6,7 +6,11 @@ pub mod passes;
 
 #[allow(unused_imports)]
 #[cfg(feature = "pipeline")]
-pub use passes::*;
+pub use passes::{
+    brdf_bake_specular::brdf_bake_specular,
+    reflection_filtering::{rf_bspline_downsample, rf_prefilter_cubemap},
+    *,
+};
 
 use ethel::render::buffer::{TriBuffer, View, ViewMut};
 #[allow(unused_imports)]

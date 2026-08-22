@@ -1,4 +1,5 @@
 use ethel::render::buffer::StorageSection;
+use ethel::shader::Constant;
 use janus::texture::{Tex, TextureView};
 
 use crate::{
@@ -28,8 +29,8 @@ pub fn brdf_bake_specular(variant: ComputeShaderBrdfBakingSpecularVariants, outp
             [wg_size, wg_size, 1]
         });
     pass.execute(
-        StorageSection::Back,
-        &RenderPool::dummy(),
+        StorageSection::Back, //unused
+        &RenderPool::dummy(), //unused
         &Ctx {
             resolution: output.size().0 as u32,
         },
@@ -38,6 +39,7 @@ pub fn brdf_bake_specular(variant: ComputeShaderBrdfBakingSpecularVariants, outp
 
 pub const WORKGROUP_SIZE_XY: u32 = 8;
 pub const IMAGE_BINDING_OUTPUT: u32 = 0;
+pub const SAMPLES: u32 = 1024;
 
 // todo: variants for other lobes
 ethel::shader_glsl_compute! {
@@ -45,7 +47,11 @@ ethel::shader_glsl_compute! {
         workgroup [8, 8, 1];
 
         image {
-            on IMAGE_BINDING_OUTPUT => output : image2D as rg8 writeonly;
+            on IMAGE_BINDING_OUTPUT => out_brdf : image2D as rg16f writeonly;
+        };
+
+        const {
+            Constant::new("SAMPLES", SAMPLES)
         };
 
         lib {
@@ -57,8 +63,8 @@ ethel::shader_glsl_compute! {
 
         src() {
             "
-            ivec2 id   = gl_GlobalInvocationID.xy;
-            ivec2 size = imageSize(output);
+            uvec2 id   = gl_GlobalInvocationID.xy;
+            ivec2 size = imageSize(out_brdf);
 
             if (id.x >= size.x || id.y >= size.y) {
                 return;
@@ -87,15 +93,15 @@ ethel::shader_glsl_compute! {
                 vec3 L = normalize(2.0 * VdotH * H - V);
 
                 float NdotL = max(L.z, 0.0);
-                float NdotH = max(H.z, 0.0);
+                float NdotH = max(H.z, 0.0001);
                 VdotH = max(VdotH, 0.0);
 
                 if (NdotL > 0.0) {
                     float G = rendrs_ndf_SmithG2_Height(
-                        NdotV, NdotL, roughness
+                        max(angle, 0.0001), NdotL, roughness
                     );
 
-                    float weight = 4.0 * G * NdotL * (VdotH / NdotH);
+                    float weight = (4.0 * G * NdotL * VdotH) / NdotH;
 
                     float iVdotH = 1.0 - VdotH;
                     float F = iVdotH*iVdotH*iVdotH*iVdotH*iVdotH;
@@ -108,7 +114,7 @@ ethel::shader_glsl_compute! {
             scale /= float(SAMPLES);
             bias  /= float(SAMPLES);
 
-            imageStore(output, id, vec2(scale, bias));
+            imageStore(out_brdf, ivec2(id), vec4(scale, bias, 0.0, 0.0));
             ";
         }
     }
