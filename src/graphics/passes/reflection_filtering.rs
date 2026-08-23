@@ -84,10 +84,10 @@ ethel::shader_glsl_compute! {
 
             float inv_size = 1.0 / float(dstSize);
 
-            float u0 = (float(id.x) * 2.0 + 1.0 - 0.75) * inv_size - 1.0;
-            float u1 = (float(id.x) * 2.0 + 1.0 + 0.75) * inv_size - 1.0;
-            float v0 = (float(id.y) * 2.0 + 1.0 - 0.75) * -inv_size + 1.0;
-            float v1 = (float(id.y) * 2.0 + 1.0 + 0.75) * -inv_size + 1.0;
+            float u0 = ((float(id.x) - 0.75) * inv_size) * 2.0 - 1.0;
+            float u1 = ((float(id.x) + 0.75) * inv_size) * 2.0 - 1.0;
+            float v0 = ((float(id.y) - 0.75) * inv_size) * 2.0 - 1.0;
+            float v1 = ((float(id.y) + 0.75) * inv_size) * 2.0 - 1.0;
 
             float w0 = rendrs_BSpline_Weight(vec2(u0, v0));
             float w1 = rendrs_BSpline_Weight(vec2(u1, v0));
@@ -268,17 +268,14 @@ ethel::shader_glsl_compute! {
                 return;
             }
 
-            // find out what SetSGPR is, original reference calls it
-            // maybe a hlsl-specific function
-
             id.z = id.y;
             int res = base_resolution >> level;
             id.y = id.x / res;
             id.x -= id.y * res;
 
             vec2 uv = vec2(
-                (float(id.x) * 2.0 + 1.0) / (float(res) - 1.0),
-               -(float(id.y) * 2.0 + 1.0) / (float(res) + 1.0)
+                (float(id.x) / float(res)) * 2.0 - 1.0,
+                (float(id.y) / float(res)) * 2.0 - 1.0
             );
             vec3 dir = rendrs_CubemapUV(uv, id.z);
             vec3 frameZ = normalize(dir);
