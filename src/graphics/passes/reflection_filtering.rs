@@ -210,9 +210,9 @@ ethel::shader_glsl_compute! {
     struct PrefilterCubemap > [460] {
         workgroup [64, 1, 1];
 
-        uniform {
+        sampler {
             // resolution of mip 0 / aka probe reflection map res
-            length 1, input_cubemap   : samplerCube => i32;
+            on 0 => input_cubemap : samplerCube;
         };
         image {
             on IMAGE_BINDING_FILTERMIPS_MIP0 => out_mip0 : imageCube as rgba16f writeonly;

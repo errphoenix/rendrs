@@ -486,13 +486,13 @@ impl SamplerObject {
     fn set_mip_view(&self) {
         if let Some(mip) = self.mip_level {
             self.inner.set_mip_level_only(mip);
+        } else {
+            self.restore_mips();
         }
     }
 
     fn restore_mips(&self) {
-        if self.mip_level.is_some() {
-            self.inner.set_mip_level_unbound();
-        }
+        self.inner.set_mip_level_unbound();
     }
 }
 
@@ -606,7 +606,6 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
         self.bind_samplers();
         self.bind_framebuffer();
         (self.dispatch)(frame_index, ctx);
-        self.restore_samplers_mips();
     }
 }
 impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
@@ -692,10 +691,6 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
         });
     }
 
-    fn restore_samplers_mips(&self) {
-        self.samplers.iter().for_each(SamplerObject::restore_mips);
-    }
-
     pub const fn samplers(&self) -> &[SamplerObject; S] {
         &self.samplers
     }
@@ -756,7 +751,6 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
         self.bind_images();
         let workgroups = (self.pre_dispatch)(frame_index, ctx);
         self.shader.dispatch_compute(workgroups);
-        self.restore_samplers_mips();
     }
 }
 impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
@@ -779,10 +773,6 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
             let unit = i as u32;
             sampler.bind(unit);
         });
-    }
-
-    fn restore_samplers_mips(&self) {
-        self.samplers.iter().for_each(SamplerObject::restore_mips);
     }
 
     pub const fn samplers(&self) -> &[SamplerObject; S] {
