@@ -1,4 +1,46 @@
-use ethel::shader::GlslStruct;
+use ethel::{render::buffer::SingleBuffer, shader::GlslStruct};
+use janus::texture::Tex;
+
+use crate::{ComputePass, pipeline::SamplerObject};
+
+pub type IrradianceHarmonicsPass = ComputePass<IrradianceHarmonicsCtxWrapper, 1, 0>;
+
+#[derive(Debug)]
+pub struct IrradianceHarmonicsCtx<'ctx> {
+    /// A non-triple-buffered SSBO of second frequency spherical harmonics
+    ///
+    /// Each entry is an array of 9 floats.
+    ///
+    /// Currently a single entry is expected.
+    pub output_coefficients: &'ctx SingleBuffer<[f32; 9]>,
+}
+crate::context_wrapper!(for<'ctx> IrradianceHarmonicsCtx);
+
+/// Will panic if `radiance_map` is not a 16x16 cubemap.
+pub fn irradiance_harmonics(
+    shader: &ComputeShaderIrradianceHarmonics,
+    radiance_map: SamplerObject,
+) -> IrradianceHarmonicsPass {
+    let size = radiance_map.texture().size().0;
+    let mip = radiance_map.mip_view().unwrap_or_default();
+    let effective_size = size >> mip;
+
+    assert_eq!(
+        effective_size,
+        16,
+        "radiance map resolution must be 16x16 pixels, but it is {effective_size}; {}",
+        "note that a restricted view of the texture at a mip with the correct resolution will also work."
+    );
+
+    let handle_view = shader.compute_handle().view();
+    IrradianceHarmonicsPass::new(handle_view, [radiance_map], [], |_, ctx| {
+        ctx.output_coefficients
+            .bind_shader_storage(SSBO_BINDING_OUTPUT_COEFFS, 0);
+
+        // just one irradiance map
+        [1, 1, 1]
+    })
+}
 
 ethel::shader_glsl_struct! {
     struct ShCoeffs {
