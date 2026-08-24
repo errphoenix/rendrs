@@ -1,6 +1,10 @@
 use ethel::shader::{GlslLib, GlslStruct};
 
-use crate::{ComputePass, graphics::ShCoeffsBuffer, pipeline::SamplerObject};
+use crate::{
+    ComputePass,
+    graphics::ShCoeffsBuffer,
+    pipeline::{Sampler, SamplerObject},
+};
 
 pub type IrradianceHarmonicsPass = ComputePass<IrradianceHarmonicsCtxWrapper, 1, 0>;
 
@@ -20,26 +24,31 @@ pub const fn irradiance_harmonics(
     radiance_map: SamplerObject,
 ) -> IrradianceHarmonicsPass {
     let handle_view = shader.compute_handle().view();
-    IrradianceHarmonicsPass::new(handle_view, [radiance_map], [], |_, ctx| {
-        ctx.output_coefficients
-            .bind_shader_storage(SSBO_BINDING_OUTPUT_COEFFS, 0);
+    IrradianceHarmonicsPass::new(
+        handle_view,
+        [Sampler::wrap(radiance_map, SAMPLER_UNIT_RADIANCEMAP)],
+        [],
+        |_, ctx| {
+            ctx.output_coefficients
+                .bind_shader_storage(SSBO_BINDING_OUTPUT_COEFFS, 0);
 
-        // just one irradiance map
-        [1, 1, 1]
-    })
+            // just one irradiance map
+            [1, 1, 1]
+        },
+    )
 }
 
 ethel::shader_glsl_struct! {
     struct ShCoeffs {
-        y22 : [f32; 3] => vec3,
-        y31 : [f32; 3] => vec3,
-        y32 : [f32; 3] => vec3,
-        y33 : [f32; 3] => vec3,
-        y40 : [f32; 3] => vec3,
-        y41 : [f32; 3] => vec3,
-        y42 : [f32; 3] => vec3,
-        y43 : [f32; 3] => vec3,
-        y44 : [f32; 3] => vec3,
+        y22 : [f32; 4] => vec4,
+        y31 : [f32; 4] => vec4,
+        y32 : [f32; 4] => vec4,
+        y33 : [f32; 4] => vec4,
+        y40 : [f32; 4] => vec4,
+        y41 : [f32; 4] => vec4,
+        y42 : [f32; 4] => vec4,
+        y43 : [f32; 4] => vec4,
+        y44 : [f32; 4] => vec4
     }
 }
 
@@ -78,7 +87,7 @@ ethel::shader_glsl_compute! {
         };
 
         share {
-            float sm_coeffs[9][256][3];
+            vec3 sm_coeffs[9][256];
         };
 
         src() {
@@ -122,9 +131,7 @@ ethel::shader_glsl_compute! {
             }
 
             for (uint j = 0; j < 9; ++j) {
-                sm_coeffs[j][index][0] = thread_coeffs[j].x;
-                sm_coeffs[j][index][1] = thread_coeffs[j].y;
-                sm_coeffs[j][index][2] = thread_coeffs[j].z;
+                sm_coeffs[j][index] = thread_coeffs[j];
             }
 
             // sync all coeffs. writes, then process further
@@ -134,9 +141,7 @@ ethel::shader_glsl_compute! {
             for (uint stride = 128u; stride > 0u; stride >>= 1u) {
                 if (index < stride) {
                     for (uint j = 0; j < 9u; ++j) {
-                        sm_coeffs[j][index][0] += sm_coeffs[j][index + stride][0];
-                        sm_coeffs[j][index][1] += sm_coeffs[j][index + stride][1];
-                        sm_coeffs[j][index][2] += sm_coeffs[j][index + stride][2];
+                        sm_coeffs[j][index] += sm_coeffs[j][index + stride];
                     }
                 }
                 // sync for each halving
@@ -146,15 +151,15 @@ ethel::shader_glsl_compute! {
             // flush to ssbo (only thread 0)
             if (index == 0u) {
                 out_sh_coeffs = ShCoeffs(
-                    vec3(sm_coeffs[0][0][0], sm_coeffs[0][0][1], sm_coeffs[2][0][2]),
-                    vec3(sm_coeffs[1][0][0], sm_coeffs[1][0][1], sm_coeffs[1][0][2]),
-                    vec3(sm_coeffs[2][0][0], sm_coeffs[2][0][1], sm_coeffs[2][0][2]),
-                    vec3(sm_coeffs[3][0][0], sm_coeffs[3][0][1], sm_coeffs[3][0][2]),
-                    vec3(sm_coeffs[4][0][0], sm_coeffs[4][0][1], sm_coeffs[4][0][2]),
-                    vec3(sm_coeffs[5][0][0], sm_coeffs[5][0][1], sm_coeffs[5][0][2]),
-                    vec3(sm_coeffs[6][0][0], sm_coeffs[6][0][1], sm_coeffs[6][0][2]),
-                    vec3(sm_coeffs[7][0][0], sm_coeffs[7][0][1], sm_coeffs[7][0][2]),
-                    vec3(sm_coeffs[8][0][0], sm_coeffs[8][0][1], sm_coeffs[8][0][2])
+                    vec4(sm_coeffs[0][0], 0.0),
+                    vec4(sm_coeffs[1][0], 0.0),
+                    vec4(sm_coeffs[2][0], 0.0),
+                    vec4(sm_coeffs[3][0], 0.0),
+                    vec4(sm_coeffs[4][0], 0.0),
+                    vec4(sm_coeffs[5][0], 0.0),
+                    vec4(sm_coeffs[6][0], 0.0),
+                    vec4(sm_coeffs[7][0], 0.0),
+                    vec4(sm_coeffs[8][0], 0.0)
                 );
             }
             ";

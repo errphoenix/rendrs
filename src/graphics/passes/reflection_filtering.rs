@@ -3,6 +3,7 @@ use ethel::shader::GlslLib;
 use janus::texture::{MipLevels, Tex, TextureView};
 
 use crate::pipeline::CtxType;
+use crate::pipeline::Sampler;
 use crate::{
     ComputePass,
     pipeline::{ImageAccessKind, ImageObject, ImageObjectTarget, SamplerObject},
@@ -38,7 +39,7 @@ pub const fn rf_bspline_downsample(shader: &ComputeShaderBSplineDownscale) -> BS
             mip_level,
         );
 
-        input.bind(0);
+        input.bind(DOWNSCALE_IMAGE_BINDING_OUTPUT);
         output.bind();
 
         let (w, _) = target.size();
@@ -191,12 +192,18 @@ pub const fn rf_prefilter_cubemap(
         None,
         0,
     );
-    PrefilterCubemapPass::new(handle_view, [sampler], outputs, |_, ctx| {
-        let wg_size = ctx.total_pixels.div_ceil(WORKSPACE_SIZE_XY);
-        [wg_size, 6, 1]
-    })
+    PrefilterCubemapPass::new(
+        handle_view,
+        [Sampler::wrap(sampler, SAMPLER_UNIT_INPUT_CUBEMAP)],
+        outputs,
+        |_, ctx| {
+            let wg_size = ctx.total_pixels.div_ceil(WORKSPACE_SIZE_XY);
+            [wg_size, 6, 1]
+        },
+    )
 }
 
+pub const SAMPLER_UNIT_INPUT_CUBEMAP: u32 = 0;
 pub const IMAGE_BINDING_FILTERMIPS_MIP0: u32 = 0;
 pub const IMAGE_BINDING_FILTERMIPS_MIP1: u32 = 1;
 pub const IMAGE_BINDING_FILTERMIPS_MIP2: u32 = 2;
@@ -212,7 +219,7 @@ ethel::shader_glsl_compute! {
 
         sampler {
             // resolution of mip 0 / aka probe reflection map res
-            on 0 => input_cubemap : samplerCube;
+            on SAMPLER_UNIT_INPUT_CUBEMAP => input_cubemap : samplerCube;
         };
         image {
             on IMAGE_BINDING_FILTERMIPS_MIP0 => out_mip0 : imageCube as rgba16f writeonly;

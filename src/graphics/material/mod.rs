@@ -8,6 +8,7 @@ use janus::{
     texture::{ImageFormat, ImageType, Tex, Texture, TextureView},
 };
 
+#[cfg(feature = "pipeline")]
 use crate::pipeline::SamplerObject;
 
 pub const MATERIAL_TEXTURE_FORMAT: ImageFormat = ImageFormat::Rgba;

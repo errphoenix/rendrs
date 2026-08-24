@@ -4,7 +4,7 @@ pub mod brdf_bake_specular;
 pub mod irradiance_harmonics;
 pub mod reflection_filtering;
 
-pub type ShCoeffsBuffer = SingleBuffer<[f32; 27]>;
+pub type ShCoeffsBuffer = SingleBuffer<[f32; 4]>;
 
 /// Utility function for cubemap UV conversion.
 ///
