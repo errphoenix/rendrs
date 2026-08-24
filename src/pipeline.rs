@@ -5,7 +5,8 @@ use ethel::{
 use janus::{
     GlProperty, GpuResource,
     texture::{
-        ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
+        AsTexView, ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind,
+        TextureView,
     },
 };
 
@@ -444,6 +445,67 @@ impl janus::GlProperty for ImageAccessKind {
     }
 }
 
+/// An uniform sampler object with a specific unit binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Sampler {
+    inner: SamplerObject,
+    unit: u32,
+}
+impl Sampler {
+    /// Will panic if `unit` is `>= 16` when `debug_assertions` is enabled.
+    pub const fn wrap(object: SamplerObject, unit: u32) -> Self {
+        debug_assert!(unit < 16, "maximum allowed texture units is 16");
+        Self {
+            inner: object,
+            unit,
+        }
+    }
+
+    pub const fn wrap_unit0(object: SamplerObject) -> Self {
+        Self::wrap(object, 0)
+    }
+
+    pub const fn new_unit0(texture: TextureView) -> Self {
+        Self::new(texture, 0)
+    }
+
+    /// Will panic if `unit` is `>= 16` when `debug_assertions` is enabled.
+    pub const fn new(texture: TextureView, unit: u32) -> Self {
+        debug_assert!(unit < 16, "maximum allowed texture units is 16");
+        Self {
+            inner: SamplerObject::new(texture),
+            unit,
+        }
+    }
+
+    pub fn from_texture(texture: &impl AsTexView, unit: u32) -> Self {
+        Self::new(texture.as_texture_view(), unit)
+    }
+
+    pub fn with_mip_view(texture: TextureView, unit: u32, mip_view: i32) -> Self {
+        Self {
+            inner: SamplerObject::with_mip_view(texture, mip_view),
+            unit,
+        }
+    }
+
+    pub const fn inner(&self) -> &SamplerObject {
+        &self.inner
+    }
+
+    pub const fn texture(&self) -> TextureView {
+        self.inner.texture()
+    }
+
+    pub const fn mip_view(&self) -> Option<i32> {
+        self.inner.mip_level
+    }
+
+    pub fn bind(&self) {
+        self.inner.bind(self.unit);
+    }
+}
+
 /// An uniform sampler object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SamplerObject {
@@ -451,8 +513,8 @@ pub struct SamplerObject {
     mip_level: Option<i32>,
 }
 impl SamplerObject {
-    pub fn from_texture(texture: impl Into<TextureView>) -> Self {
-        Self::new(texture.into())
+    pub fn from_texture(texture: &impl AsTexView) -> Self {
+        Self::new(texture.as_texture_view())
     }
 
     pub const fn new(texture: TextureView) -> Self {
@@ -581,7 +643,7 @@ pub trait Pass<K: CtxType> {
 #[derive(Debug)]
 pub struct DrawPass<K: CtxType, const S: usize, const O: usize> {
     shader: ShaderHandleView,
-    samplers: [SamplerObject; S],
+    samplers: [Sampler; S],
     outputs: [OutputObject; O],
     dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>),
     framebuffer: Option<Framebuffer>,
@@ -618,7 +680,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
     /// variants, but up to only one (optional) [`OutputObject::Depth`].
     pub const fn new(
         shader: ShaderHandleView,
-        samplers: [SamplerObject; S],
+        samplers: [Sampler; S],
         outputs: [OutputObject; O],
         dispatch: fn(StorageSection, &K::Ctx<'_>),
     ) -> Self {
@@ -685,17 +747,16 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
     }
 
     pub fn bind_samplers(&self) {
-        self.samplers.iter().enumerate().for_each(|(i, sampler)| {
-            let unit = i as u32;
-            sampler.bind(unit);
+        self.samplers.iter().for_each(|sampler| {
+            sampler.bind();
         });
     }
 
-    pub const fn samplers(&self) -> &[SamplerObject; S] {
+    pub const fn samplers(&self) -> &[Sampler; S] {
         &self.samplers
     }
 
-    pub fn sampler(&self, index: usize) -> &SamplerObject {
+    pub fn sampler(&self, index: usize) -> &Sampler {
         &self.samplers[index]
     }
 
@@ -729,7 +790,7 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
 #[derive(Debug)]
 pub struct ComputePass<K: CtxType, const S: usize, const I: usize> {
     shader: ComputeShaderHandleView,
-    samplers: [SamplerObject; S],
+    samplers: [Sampler; S],
     images: [ImageObjectTarget; I],
     pre_dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>) -> [u32; 3],
 }
@@ -756,7 +817,7 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
 impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     pub const fn new(
         shader: ComputeShaderHandleView,
-        samplers: [SamplerObject; S],
+        samplers: [Sampler; S],
         images: [ImageObjectTarget; I],
         pre_dispatch: fn(StorageSection, &K::Ctx<'_>) -> [u32; 3],
     ) -> Self {
@@ -769,17 +830,16 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
     }
 
     pub fn bind_samplers(&self) {
-        self.samplers.iter().enumerate().for_each(|(i, sampler)| {
-            let unit = i as u32;
-            sampler.bind(unit);
+        self.samplers.iter().for_each(|sampler| {
+            sampler.bind();
         });
     }
 
-    pub const fn samplers(&self) -> &[SamplerObject; S] {
+    pub const fn samplers(&self) -> &[Sampler; S] {
         &self.samplers
     }
 
-    pub fn sampler(&self, index: usize) -> &SamplerObject {
+    pub fn sampler(&self, index: usize) -> &Sampler {
         &self.samplers[index]
     }
 
