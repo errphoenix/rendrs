@@ -1,7 +1,6 @@
-use ethel::{render::buffer::SingleBuffer, shader::GlslStruct};
-use janus::texture::Tex;
+use ethel::shader::{GlslLib, GlslStruct};
 
-use crate::{ComputePass, pipeline::SamplerObject};
+use crate::{ComputePass, graphics::ShCoeffsBuffer, pipeline::SamplerObject};
 
 pub type IrradianceHarmonicsPass = ComputePass<IrradianceHarmonicsCtxWrapper, 1, 0>;
 
@@ -12,26 +11,14 @@ pub struct IrradianceHarmonicsCtx<'ctx> {
     /// Each entry is an array of 9 floats.
     ///
     /// Currently a single entry is expected.
-    pub output_coefficients: &'ctx SingleBuffer<[f32; 9]>,
+    pub output_coefficients: &'ctx ShCoeffsBuffer,
 }
 crate::context_wrapper!(for<'ctx> IrradianceHarmonicsCtx);
 
-/// Will panic if `radiance_map` is not a 16x16 cubemap.
-pub fn irradiance_harmonics(
+pub const fn irradiance_harmonics(
     shader: &ComputeShaderIrradianceHarmonics,
     radiance_map: SamplerObject,
 ) -> IrradianceHarmonicsPass {
-    let size = radiance_map.texture().size().0;
-    let mip = radiance_map.mip_view().unwrap_or_default();
-    let effective_size = size >> mip;
-
-    assert_eq!(
-        effective_size,
-        16,
-        "radiance map resolution must be 16x16 pixels, but it is {effective_size}; {}",
-        "note that a restricted view of the texture at a mip with the correct resolution will also work."
-    );
-
     let handle_view = shader.compute_handle().view();
     IrradianceHarmonicsPass::new(handle_view, [radiance_map], [], |_, ctx| {
         ctx.output_coefficients
@@ -44,15 +31,15 @@ pub fn irradiance_harmonics(
 
 ethel::shader_glsl_struct! {
     struct ShCoeffs {
-        y22 : f32 => float,
-        y31 : f32 => float,
-        y32 : f32 => float,
-        y33 : f32 => float,
-        y40 : f32 => float,
-        y41 : f32 => float,
-        y42 : f32 => float,
-        y43 : f32 => float,
-        y44 : f32 => float,
+        y22 : [f32; 3] => vec3,
+        y31 : [f32; 3] => vec3,
+        y32 : [f32; 3] => vec3,
+        y33 : [f32; 3] => vec3,
+        y40 : [f32; 3] => vec3,
+        y41 : [f32; 3] => vec3,
+        y42 : [f32; 3] => vec3,
+        y43 : [f32; 3] => vec3,
+        y44 : [f32; 3] => vec3,
     }
 }
 
@@ -81,7 +68,7 @@ ethel::shader_glsl_compute! {
         ssbo {
             ethel::shader_glsl_ssbo! {
                 buf _devShCoeffs => {
-                    out_sh_coeffs: ShCoeffs;
+                    ShCoeffs : out_sh_coeffs;
                 }
             }
         };
@@ -91,7 +78,7 @@ ethel::shader_glsl_compute! {
         };
 
         share {
-            vec3 sm_coeffs[9][256];
+            float sm_coeffs[9][256][3];
         };
 
         src() {
@@ -99,12 +86,12 @@ ethel::shader_glsl_compute! {
             uvec2 id    = gl_LocalInvocationID.xy;
             uint  index = gl_LocalInvocationIndex;
 
-            float size = float(textureSize(radiance_map, 0).x);
-            vec2 uv    = ((vec2(id) + 0.5) / size) * 2.0 - 1.0;
+            float S = 16.0;
+            vec2 uv = ((vec2(id) + 0.5) / S) * 2.0 - 1.0;
 
             float d_sq = uv.x*uv.x + uv.y*uv.y + 1.0;
             // angle subtended by the texel
-            float d_omega = 4.0 / (sqrt(d_sq) * d_sq * size*size);
+            float d_omega = 4.0 / (sqrt(d_sq) * d_sq * 256.0);
 
             vec3 thread_coeffs[9] = vec3[9](
                 vec3(0.0),vec3(0.0),vec3(0.0),
@@ -129,13 +116,15 @@ ethel::shader_glsl_compute! {
                 );
 
                 vec3 kL = L * d_omega;
-                for (uint j = 0; j < 9u; ++i) {
+                for (uint j = 0; j < 9u; ++j) {
                     thread_coeffs[j] += kL * k_cos[j];
                 }
             }
 
-            for (uint j; j < 9; ++j) {
-                sm_coeffs[j][index] = thread_coeffs[j];
+            for (uint j = 0; j < 9; ++j) {
+                sm_coeffs[j][index][0] = thread_coeffs[j].x;
+                sm_coeffs[j][index][1] = thread_coeffs[j].y;
+                sm_coeffs[j][index][2] = thread_coeffs[j].z;
             }
 
             // sync all coeffs. writes, then process further
@@ -145,7 +134,9 @@ ethel::shader_glsl_compute! {
             for (uint stride = 128u; stride > 0u; stride >>= 1u) {
                 if (index < stride) {
                     for (uint j = 0; j < 9u; ++j) {
-                        sm_coeffs[j][index] += sm_coeffs[j][index + stride];
+                        sm_coeffs[j][index][0] += sm_coeffs[j][index + stride][0];
+                        sm_coeffs[j][index][1] += sm_coeffs[j][index + stride][1];
+                        sm_coeffs[j][index][2] += sm_coeffs[j][index + stride][2];
                     }
                 }
                 // sync for each halving
@@ -155,18 +146,51 @@ ethel::shader_glsl_compute! {
             // flush to ssbo (only thread 0)
             if (index == 0u) {
                 out_sh_coeffs = ShCoeffs(
-                    sm_coeffs[0],
-                    sm_coeffs[1],
-                    sm_coeffs[2],
-                    sm_coeffs[3],
-                    sm_coeffs[4],
-                    sm_coeffs[5],
-                    sm_coeffs[6],
-                    sm_coeffs[7],
-                    sm_coeffs[8]
+                    vec3(sm_coeffs[0][0][0], sm_coeffs[0][0][1], sm_coeffs[2][0][2]),
+                    vec3(sm_coeffs[1][0][0], sm_coeffs[1][0][1], sm_coeffs[1][0][2]),
+                    vec3(sm_coeffs[2][0][0], sm_coeffs[2][0][1], sm_coeffs[2][0][2]),
+                    vec3(sm_coeffs[3][0][0], sm_coeffs[3][0][1], sm_coeffs[3][0][2]),
+                    vec3(sm_coeffs[4][0][0], sm_coeffs[4][0][1], sm_coeffs[4][0][2]),
+                    vec3(sm_coeffs[5][0][0], sm_coeffs[5][0][1], sm_coeffs[5][0][2]),
+                    vec3(sm_coeffs[6][0][0], sm_coeffs[6][0][1], sm_coeffs[6][0][2]),
+                    vec3(sm_coeffs[7][0][0], sm_coeffs[7][0][1], sm_coeffs[7][0][2]),
+                    vec3(sm_coeffs[8][0][0], sm_coeffs[8][0][1], sm_coeffs[8][0][2])
                 );
             }
             ";
         }
     }
 }
+
+/// Evaluate second-frequency spherical harmonics functions.
+///
+/// Creates the `rendrs_EvalSH_L2` function which takes the following
+/// arguments:
+/// * the second-frequency spherical harmonics coefficients as [`ShCoeffs`]
+/// * a 3d vector to sample the function
+///
+/// Returns a 3d vector representing the value of the function at the encoded
+/// point.
+///
+/// Requires the [`ShCoeffs`] glsl type.
+pub const LIB_EVALUATE_SH_L2: GlslLib = ethel::shader_glsl_lib! {
+    vec3 rendrs_EvalSH_L2[
+        sh : ShCoeffs,
+        r  : vec3
+    ] => "
+        return max(vec3(0.0), vec3(
+            // l0 band
+            sh.y22 * 0.282095 +
+            // l1 band, linear
+            sh.y31 * (0.488602 * r.y) +
+            sh.y32 * (0.488602 * r.z) +
+            sh.y33 * (0.488602 * r.x) +
+            // l2 band, quadratic
+            sh.y40 * (1.092548 * r.x * r.y) +
+            sh.y41 * (1.092548 * r.y * r.z) +
+            sh.y42 * (0.315392 * (3.0 * r.z*r.z - 1.0)) +
+            sh.y43 * (1.092548 * r.x * r.z) +
+            sh.y44 * (0.546274 * (r.x*r.x - r.z*r.z))
+        ));
+    "
+};

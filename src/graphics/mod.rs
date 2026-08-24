@@ -8,6 +8,7 @@ pub mod passes;
 #[cfg(feature = "pipeline")]
 pub use passes::{
     brdf_bake_specular::brdf_bake_specular,
+    irradiance_harmonics::irradiance_harmonics,
     reflection_filtering::{rf_bspline_downsample, rf_prefilter_cubemap},
     *,
 };
