@@ -43,10 +43,16 @@ pub fn image_blit(
         dst_layer,
         dst_mip,
     );
-    let (w, h) = src.texture().size();
+    let (w, h) = {
+        let (w, h) = src.texture().size();
+        let mip = src_mip.unwrap_or_default();
+        (w >> mip, h >> mip)
+    };
+
     ImageBlitPass::new(shader, [], [src, dst], |_, ctx| {
-        let wg_x = ctx.resolution.0.div_ceil(WORKGROUP_SIZE_XY);
-        let wg_y = ctx.resolution.1.div_ceil(WORKGROUP_SIZE_XY);
+        let (w, h) = ctx.resolution;
+        let wg_x = w.div_ceil(WORKGROUP_SIZE_XY);
+        let wg_y = h.div_ceil(WORKGROUP_SIZE_XY);
         [wg_x, wg_y, 1]
     })
     .execute(
@@ -76,12 +82,11 @@ macro_rules! image_blit_compute {
 
                     src() {
                         "
-                        uvec2 size = imageSize(img_src);
-                        uvec2 id   = gl_GlobalInvocationID.xy;
-                        if (any(id >= size)) return;
-                        uvec2 px = id + offset;
-                        vec4 C = imageLoad(img_src, px);
-                        imageStore(img_dst, px, C);
+                        ivec2 size = imageSize(img_src);
+                        ivec2 id   = ivec2(gl_GlobalInvocationID.xy);
+                        if (id.x >= size.x || id.y >= size.y) return;
+                        vec4 C = imageLoad(img_src, id);
+                        imageStore(img_dst, id, C);
                         ";
                     }
                 }
