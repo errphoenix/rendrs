@@ -7,8 +7,7 @@ use crate::{
     pipeline::{ImageAccessKind, ImageObject, ImageObjectTarget, Pass, RenderPool},
 };
 
-pub fn brdf_bake_specular(variant: ComputeShaderBrdfBakingSpecularVariants, output: TextureView) {
-    let shader = ComputeShaderBrdfBakingSpecular::new_compiled_variant(variant);
+pub fn brdf_bake_specular(shader: &ComputeShaderBrdfBakingSpecular, output: TextureView) {
     let image = ImageObjectTarget::new(
         ImageObject::DirectTexture(output),
         ImageAccessKind::WriteOnly,
@@ -35,6 +34,14 @@ pub fn brdf_bake_specular(variant: ComputeShaderBrdfBakingSpecularVariants, outp
             resolution: output.size().0 as u32,
         },
     );
+}
+
+pub fn brdf_bake_specular_compile(
+    variant: ComputeShaderBrdfBakingSpecularVariants,
+    output: TextureView,
+) {
+    let shader = ComputeShaderBrdfBakingSpecular::new_compiled_variant(variant);
+    brdf_bake_specular(&shader, output);
 }
 
 pub const WORKGROUP_SIZE_XY: u32 = 8;

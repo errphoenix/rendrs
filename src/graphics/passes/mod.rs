@@ -1,6 +1,7 @@
 use ethel::{render::buffer::SingleBuffer, shader::GlslLib};
 
 pub mod brdf_bake_specular;
+pub mod image_blit;
 pub mod irradiance_harmonics;
 pub mod reflection_filtering;
 

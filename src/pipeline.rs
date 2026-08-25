@@ -295,6 +295,22 @@ impl ImageObjectTarget {
         }
     }
 
+    pub const fn new_with_mip_level(
+        object: ImageObject,
+        access: ImageAccessKind,
+        unit: u32,
+        layer: Option<i32>,
+        mip_level: Option<i32>,
+    ) -> Self {
+        Self {
+            object,
+            access,
+            unit,
+            layer,
+            mip_level,
+        }
+    }
+
     pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
         self.object.revalidate_if_pooled(render_pool);
     }
