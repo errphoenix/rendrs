@@ -48,7 +48,7 @@ pub const fn rf_bspline_downsample(shader: &ComputeShaderBSplineDownscale) -> BS
     })
 }
 
-pub const FILTERING_MIP_COUNT: u32 = 5;
+pub const FILTERING_MIP_COUNT: u32 = 6;
 
 /// The image binding index for the output texture to write the mipmap to.
 ///
@@ -137,7 +137,8 @@ pub const LIB_BSPLINE_JACOBIAN_WEIGHT: GlslLib = ethel::shader_glsl_lib! {
     "
 };
 
-pub type PrefilterCubemapPass = ComputePass<PrefilterCubemapCtx, 1, 5>;
+pub type PrefilterCubemapPass =
+    ComputePass<PrefilterCubemapCtx, 1, { FILTERING_MIP_COUNT as usize }>;
 
 #[derive(Debug)]
 pub struct PrefilterCubemapCtx {
@@ -209,6 +210,7 @@ pub const IMAGE_BINDING_FILTERMIPS_MIP1: u32 = 1;
 pub const IMAGE_BINDING_FILTERMIPS_MIP2: u32 = 2;
 pub const IMAGE_BINDING_FILTERMIPS_MIP3: u32 = 3;
 pub const IMAGE_BINDING_FILTERMIPS_MIP4: u32 = 4;
+pub const IMAGE_BINDING_FILTERMIPS_MIP5: u32 = 5;
 
 // todo: adjust indexing to batch many probes under one dispatch call
 //       instead of dispatching per-probe like downsampling pass.
@@ -227,6 +229,7 @@ ethel::shader_glsl_compute! {
             on IMAGE_BINDING_FILTERMIPS_MIP2 => out_mip2 : imageCube as rgba16f writeonly;
             on IMAGE_BINDING_FILTERMIPS_MIP3 => out_mip3 : imageCube as rgba16f writeonly;
             on IMAGE_BINDING_FILTERMIPS_MIP4 => out_mip4 : imageCube as rgba16f writeonly;
+            on IMAGE_BINDING_FILTERMIPS_MIP5 => out_mip5 : imageCube as rgba16f writeonly;
         };
 
         type {
@@ -271,6 +274,9 @@ ethel::shader_glsl_compute! {
             } else if (id.x < mip_hsizes.size_4) {
                 level = 4;
                 id.x -= mip_hsizes.size_3;
+            } else if (id.x < mip_hsizes.size_5) {
+                level = 5;
+                id.x -= mip_hsizes.size_4;
             } else {
                 return;
             }
@@ -404,6 +410,9 @@ ethel::shader_glsl_compute! {
                 case 4:
                     imageStore(out_mip4, id, color);
                     break;
+                case 5:
+                    imageStore(out_mip5, id, color);
+                    break;
             }
             ";
         }
@@ -416,7 +425,8 @@ ethel::shader_glsl_struct! {
         size_1 : i32 => int,
         size_2 : i32 => int,
         size_3 : i32 => int,
-        size_4 : i32 => int
+        size_4 : i32 => int,
+        size_5 : i32 => int
     }
 }
 
@@ -429,12 +439,14 @@ const LIB_HELPER_MIP_HSIZES: GlslLib = ethel::shader_glsl_lib! {
         int s2 = base_mip_size >> 2;
         int s3 = base_mip_size >> 3;
         int s4 = base_mip_size >> 4;
+        int s5 = base_mip_size >> 5;
         return MipSizes(
             s0*s0,
             s0*s0+s1*s1,
             s0*s0+s1*s1+s2*s2,
             s0*s0+s1*s1+s2*s2+s3*s3,
-            s0*s0+s1*s1+s2*s2+s3*s3+s4*s4
+            s0*s0+s1*s1+s2*s2+s3*s3+s4*s4,
+            s0*s0+s1*s1+s2*s2+s3*s3+s4*s4+s5*s5
         );
     "
 };
