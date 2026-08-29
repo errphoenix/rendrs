@@ -15,10 +15,11 @@ indoc = { version = "2.0.7", optional = true }
 image = { version = "0.25.10", optional = true }
 
 [features]
-default = ["framebuffer", "batching", "pipeline", "graphics"]
+default = ["framebuffer", "batching", "pipeline", "graphics", "geometry"]
 pipeline = ["framebuffer", "dep:paste"]
 framebuffer = []
 glam = ["dep:glam"]
 pack = ["dep:indoc"]
 batching = []
 graphics = ["dep:indoc", "dep:image", "dep:paste", "ethel/assets"]
+geometry = ["pipeline", "pack"]
