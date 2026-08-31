@@ -1,11 +1,13 @@
 use ethel::render::buffer::SingleBuffer;
 
+pub use dispatch::GeomPass;
 pub use shader::{
     SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_NOTA, SSBO_BINDING_GBANK_TRIANGLE,
     SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS, SSBO_BINDING_GBANK_VERTEX, TYPE_DOMAIN_DATA,
     TYPE_TRIANGLE_ATTRIBS,
 };
 
+pub mod dispatch;
 pub mod shader;
 
 const DOMAIN_INDEX_BITSHIFT: u32 = 24;
@@ -13,6 +15,11 @@ const DOMAIN_GEOID_BITMASK: u32 = u32::MAX >> (32 - DOMAIN_INDEX_BITSHIFT);
 
 pub const DOMAIN_MAX_INDEX: u32 = 0xff;
 pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
+
+/// Max amount of domains submitted in a single geometry dispatch.
+///
+/// This is equal to the latest OpenGL minimum workgroup count.
+pub const MAX_DOMAIN_COUNT: u32 = 65535;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -63,7 +70,7 @@ pub type TriangleAttribsBuffer = SingleBuffer<TriangleAttribs>;
 /// Index 0 = vertex counter
 ///
 /// Index 1 = triangle counter
-pub type CountersBuffer = SingleBuffer<[u32; 2]>;
+pub type GCounterBuffer = SingleBuffer<[u32; 2]>;
 
 #[derive(Debug, Default)]
 pub struct GeometryBank {
@@ -73,7 +80,7 @@ pub struct GeometryBank {
     nota: NoTaBuffer,
     triangle: TriangleBuffer,
     triangle_attribs: TriangleAttribsBuffer,
-    counters: CountersBuffer,
+    gcounter: GCounterBuffer,
 }
 impl GeometryBank {
     pub fn new(vertex_cap: usize, triangle_cap: usize) -> Self {
@@ -84,7 +91,7 @@ impl GeometryBank {
             nota: SingleBuffer::zeroed(vertex_cap),
             triangle: SingleBuffer::zeroed(triangle_cap),
             triangle_attribs: SingleBuffer::zeroed(triangle_cap),
-            counters: SingleBuffer::zeroed(1),
+            gcounter: SingleBuffer::zeroed(1),
         }
     }
 
@@ -112,8 +119,8 @@ impl GeometryBank {
         &self.triangle_attribs
     }
 
-    pub const fn counters_buffer(&self) -> &CountersBuffer {
-        &self.counters
+    pub const fn gcounter_buffer(&self) -> &GCounterBuffer {
+        &self.gcounter
     }
 
     pub fn bind_data_buffers_to(
@@ -138,11 +145,11 @@ impl GeometryBank {
         );
     }
 
-    pub fn bind_counters_buffer_to(&self, index: u32) {
-        self.counters.bind_shader_storage(index, 0);
+    pub fn bind_gcounter_buffer_to(&self, index: u32) {
+        self.gcounter.bind_shader_storage(index, 0);
     }
 
-    pub fn bind_counters_buffer(&self) {
-        self.bind_counters_buffer_to(SSBO_BINDING_GBANK_COUNTERS);
+    pub fn bind_gcounter_buffer(&self) {
+        self.bind_gcounter_buffer_to(SSBO_BINDING_GBANK_GCOUNTER);
     }
 }

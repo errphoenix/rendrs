@@ -83,6 +83,27 @@ pub const SSBO_GBANK_GCOUNTER: GlslStorage = ethel::shader_glsl_ssbo! {
 /// The definition syntax for each of these is identical to
 /// [`ethel's compute shaders`].
 ///
+/// ## Context
+///
+/// There is also an additional (also optional) block `context`: this is where
+/// the inner [`compute pass`]' context data is defined. This will create a
+/// [`CtxType`] struct to be initialized and passed to the [`compute pass`]
+/// when dispatched.
+///
+/// Context structs allow storing borrowed data. Borrowed data must be
+/// defined with the `'ctx` lifetime like in the example below.
+///
+/// ### Context definition example:
+/// ```rust,ignore
+/// context {
+///     some_data : u32;
+///     some_borrowed_data : TriBuffer<u32>, for 'ctx;
+/// }
+/// ```
+///
+/// [`Compute Pass`]: crate::pipeline::ComputePass
+/// [`CtxType`]: crate::pipeline::CtxType
+///
 /// # Source
 ///
 /// After the optional blocks, the shader's 'source' is defined: this is a
@@ -172,10 +193,28 @@ macro_rules! geometry_submission_job {
                 $($share_t:ident $share_n:ident $([$arr_c:expr])*;)*
             })?
 
+            $(context {
+                $($ctx_field:ident : $ctx_type:ty $(, for $ctx_lt:lifetime)? ;)+
+            })?
+
             $source:literal
         }
     ) => {
         paste::paste! {
+
+        #[derive(Debug)]
+        pub struct [< $name GeomCtx >]<'ctx> {
+            pub shader: &'ctx [< ComputeShader $name GeomSubmit >],
+            $($(pub $ctx_field: $(&$ctx_lt)? $ctx_type,)+)?
+        }
+        crate::context_wrapper!(for<'ctx> [< $name GeomCtx >]);
+
+        pub type [< $name GeomPass >] = $crate::geometry::GeomPass<
+            [< ComputeShader $name GeomSubmit >],
+            [< $name GeomCtxWrapper >],
+            0, 0 // todo: sampler & image counts
+        >;
+
         ethel::shader_glsl_compute! {
             struct [< $name GeomSubmit >] > [460] {
                 workgroup [64, 1, 1];
