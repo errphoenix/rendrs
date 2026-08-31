@@ -13,7 +13,7 @@ macro_rules! ssbo_binding {
     (Rendrs_GBANK_Triangle) => {
         2
     };
-    (Rendrs_GBANK_TriangleMetadata) => {
+    (Rendrs_GBANK_TriangleAttribs) => {
         3
     };
     (Rendrs_GBANK_Counters) => {
@@ -21,10 +21,16 @@ macro_rules! ssbo_binding {
     };
 }
 
+pub const SSBO_BINDING_GBANK_VERTEX: u32 = ssbo_binding!(Rendrs_GBANK_Vertex);
+pub const SSBO_BINDING_GBANK_NOTA: u32 = ssbo_binding!(Rendrs_GBANK_NoTa);
+pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_Triangle);
+pub const SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS: u32 = ssbo_binding!(Rendrs_GBANK_TriangleAttribs);
+pub const SSBO_BINDING_GBANK_COUNTERS: u32 = ssbo_binding!(Rendrs_GBANK_Counters);
+
 const DOMAIN_INDEX_BITSHIFT: u32 = 24;
 const DOMAIN_GEOID_BITMASK: u32 = u32::MAX >> (32 - DOMAIN_INDEX_BITSHIFT);
 
-pub const DOMAIN_MAX_INDEX: u32 = u8::MAX as u32;
+pub const DOMAIN_MAX_INDEX: u32 = 0xff;
 pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
 
 #[repr(C)]
@@ -53,7 +59,7 @@ impl DomainData {
 }
 ethel::shader_glsl_struct! {
     struct DomainData {
-        idx4_geoid28 : u32 => uint
+        idx8_geoid24 : u32 => uint
         thread_count : u32 => uint
     }
 }
@@ -61,17 +67,17 @@ ethel::shader_glsl_struct! {
 /// todo
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TriangleMetadata {
+pub struct TriangleAttribs {
     pub geometry_id: u32,
 }
 ethel::shader_glsl_struct! {
-    struct TriangleMetadata {
+    struct TriangleAttribs {
         geometry_id : u32 => uint
     }
 }
 
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
-pub const TYPE_TRIANGLE_METADATA: GlslStruct = TriangleMetadataGlslStruct::as_definition();
+pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 
 /// Vertex buffer represented as `x, y, z` 32-bit floats.
 pub type VertexBuffer = SingleBuffer<[f32; 3]>;
@@ -82,8 +88,8 @@ pub type NoTaBuffer = SingleBuffer<[f32; 4]>;
 /// Basic triangle primitive buffer represented as simple vertex indices.
 pub type TriangleBuffer = SingleBuffer<[u32; 3]>;
 
-/// Per-triangle metadata used later in rendering.
-pub type TriangleMetadataBuffer = SingleBuffer<TriangleMetadata>;
+/// Per-triangle attributes used later in rendering.
+pub type TriangleAttribsBuffer = SingleBuffer<TriangleAttribs>;
 
 /// Atomic counters buffer.
 ///
@@ -99,7 +105,7 @@ pub struct GeometryBank {
     vert: VertexBuffer,
     nota: NoTaBuffer,
     triangle: TriangleBuffer,
-    triangle_meta: TriangleMetadataBuffer,
+    triangle_attribs: TriangleAttribsBuffer,
     counters: CountersBuffer,
 }
 impl GeometryBank {
@@ -110,7 +116,7 @@ impl GeometryBank {
             vert: SingleBuffer::zeroed(vertex_cap),
             nota: SingleBuffer::zeroed(vertex_cap),
             triangle: SingleBuffer::zeroed(triangle_cap),
-            triangle_meta: SingleBuffer::zeroed(triangle_cap),
+            triangle_attribs: SingleBuffer::zeroed(triangle_cap),
             counters: SingleBuffer::zeroed(1),
         }
     }
@@ -135,8 +141,8 @@ impl GeometryBank {
         &self.triangle
     }
 
-    pub const fn triangle_metadata_buffer(&self) -> &TriangleMetadataBuffer {
-        &self.triangle_meta
+    pub const fn triangle_attribs_buffer(&self) -> &TriangleAttribsBuffer {
+        &self.triangle_attribs
     }
 
     pub const fn counters_buffer(&self) -> &CountersBuffer {
@@ -153,15 +159,15 @@ impl GeometryBank {
         self.vert.bind_shader_storage(v_index, 0);
         self.nota.bind_shader_storage(nt_index, 0);
         self.triangle.bind_shader_storage(tri_index, 0);
-        self.triangle_meta.bind_shader_storage(trimeta_index, 0);
+        self.triangle_attribs.bind_shader_storage(trimeta_index, 0);
     }
 
     pub fn bind_data_buffers(&self) {
         self.bind_data_buffers_to(
-            ssbo_binding!(Rendrs_GBANK_Vertex),
-            ssbo_binding!(Rendrs_GBANK_NoTa),
-            ssbo_binding!(Rendrs_GBANK_Triangle),
-            ssbo_binding!(Rendrs_GBANK_TriangleMetadata),
+            SSBO_BINDING_GBANK_VERTEX,
+            SSBO_BINDING_GBANK_NOTA,
+            SSBO_BINDING_GBANK_TRIANGLE,
+            SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS,
         );
     }
 
@@ -170,7 +176,7 @@ impl GeometryBank {
     }
 
     pub fn bind_counters_buffer(&self) {
-        self.bind_counters_buffer_to(ssbo_binding!(Rendrs_GBANK_Counters));
+        self.bind_counters_buffer_to(SSBO_BINDING_GBANK_COUNTERS);
     }
 
     pub const fn glsl_vertex() -> GlslStorage {
@@ -197,10 +203,10 @@ impl GeometryBank {
         }
     }
 
-    pub const fn glsl_triangle_meta() -> GlslStorage {
+    pub const fn glsl_triangle_attribs() -> GlslStorage {
         ethel::shader_glsl_ssbo! {
-            buf Rendrs_GBANK_TriangleMetadata => {
-                [dyn_array TriangleMetadata : rendrs_gbank_triangle_meta]
+            buf Rendrs_GBANK_TriangleAttribs => {
+                [dyn_array TriangleAttribs : rendrs_gbank_triangle_attribs]
             }
         }
     }
@@ -237,15 +243,15 @@ impl GeometryBank {
 /// The shader's source has access to the following parameters:
 /// * GLSL's standard compute shader variables (`gl_GlobalInvocationID`, etc.)*
 /// * `rendrs_GeometryID` the index of the current working geometric entity
-/// * `rendrs_DomainID` the local index of the current working domain of the
+/// * `rendrs_DomainIndex` the local index of the current working domain of the
 ///   current geometric entity
 /// * `rendrs_WorkGroupID` the global index of the current working domain,
 ///   equal to `gl_WorkGroupID.x`
-/// * `rendrs_ThreadIndex` the thread index (invocation) local to the current
+/// * `rendrs_LaneIndex` the thread index (invocation) local to the current
 ///   working geometric entity
-/// * `rendrs_DomainThreadIndex` the thread index (invocation) local to the
+/// * `rendrs_LocalThreadID` the thread index (invocation) local to the
 ///   current working domain, equal to `gl_LocalInvocationID.x`
-/// * `rendrs_GlobalThreadIndex` the global thread index (invocation), equal
+/// * `rendrs_GlobalThreadID` the global thread index (invocation), equal
 ///   to `gl_GlobalInvocationID.x`
 ///
 /// *Note that the shader's workgroup (frequently referred to as `domain`) is
@@ -335,7 +341,7 @@ macro_rules! geometry_submission_job {
                 };)?
                 type {
                     TYPE_DOMAIN_DATA
-                    TYPE_TRIANGLE_METADATA
+                    TYPE_TRIANGLE_ATTRIBS
 
                     $($($type_glsl)+)?
                 };
@@ -343,8 +349,9 @@ macro_rules! geometry_submission_job {
                     $crate::geometry::GeometryBank::glsl_vertex()
                     $crate::geometry::GeometryBank::glsl_nota()
                     $crate::geometry::GeometryBank::glsl_triangle()
-                    $crate::geometry::GeometryBank::glsl_triangle_meta()
+                    $crate::geometry::GeometryBank::glsl_triangle_attribs()
                     $crate::geometry::GeometryBank::glsl_counters()
+
                     $($($ssbo_glsl)+)?
                 };
                 lib {
@@ -378,8 +385,8 @@ macro_rules! geometry_submission_job {
                             rendrs_gbank_triangle[triangle_index][1] = v1;
                             rendrs_gbank_triangle[triangle_index][2] = v2;
 
-                            TriangleMetadata metadata = TriangleMetadata(geom_id);
-                            rendrs_gbank_triangle_meta[triangle_index] = metadata;
+                            TriangleAttribs attribs = TriangleAttribs(geom_id);
+                            rendrs_gbank_triangle_attribs[triangle_index] = attribs;
 
                             return triangle_index;
                         }
@@ -410,11 +417,11 @@ macro_rules! geometry_submission_job {
                     ethel::shader::GlslLib::new(concat!(
                         "void _submitGeometry(
                             in uint rendrs_GeometryID,
-                            in uint rendrs_ClusterID,
+                            in uint rendrs_DomainIndex,
                             in uint rendrs_WorkGroupID,
-                            in uint rendrs_ThreadIndex,
-                            in uint rendrs_ClusterThreadIndex,
-                            in uint rendrs_GlobalThreadIndex
+                            in uint rendrs_LaneIndex,
+                            in uint rendrs_LocalThreadID,
+                            in uint rendrs_GlobalThreadID
                         ) {\n", $source, "\n}"
                     ));
                 };
@@ -436,19 +443,19 @@ macro_rules! geometry_submission_job {
                     uint _d_geoid  = _iDomain_unpackGeoID(_d_packed);
 
                     const uint rendrs_GeometryID  = _d_geoid;
-                    const uint rendrs_ClusterID   = _d_index;
+                    const uint rendrs_DomainIndex = _d_index;
                     const uint rendrs_WorkGroupID = gl_WorkGroupID.x;
-                    const uint rendrs_ThreadIndex = 64 * _d_index + gl_LocalInvocationID.x;
-                    const uint rendrs_ClusterThreadIndex = gl_LocalInvocationID.x;
-                    const uint rendrs_GlobalThreadIndex = gl_GlobalInvocationID.x;
+                    const uint rendrs_LaneIndex = 64 * _d_index + gl_LocalInvocationID.x;
+                    const uint rendrs_LocalThreadID = gl_LocalInvocationID.x;
+                    const uint rendrs_GlobalThreadID = gl_GlobalInvocationID.x;
 
                     _submitGeometry(
                         rendrs_GeometryID,
-                        rendrs_ClusterID,
+                        rendrs_DomainIndex,
                         rendrs_WorkGroupID,
-                        rendrs_ThreadIndex,
-                        rendrs_ClusterThreadIndex,
-                        rendrs_GlobalThreadIndex
+                        rendrs_LaneIndex,
+                        rendrs_LocalThreadID,
+                        rendrs_GlobalThreadID
                     );
                     ";
                 }
