@@ -32,6 +32,9 @@ macro_rules! ssbo_binding {
     (Rendrs_GBANK_GCounter) => {
         4
     };
+    (Rendrs_Domains) => {
+        5
+    };
 }
 
 pub const SSBO_BINDING_GBANK_VERTEX: u32 = ssbo_binding!(Rendrs_GBANK_Vertex);
@@ -39,35 +42,37 @@ pub const SSBO_BINDING_GBANK_NOTA: u32 = ssbo_binding!(Rendrs_GBANK_NoTa);
 pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_Triangle);
 pub const SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS: u32 = ssbo_binding!(Rendrs_GBANK_TriangleAttribs);
 pub const SSBO_BINDING_GBANK_GCOUNTER: u32 = ssbo_binding!(Rendrs_GBANK_GCounter);
+pub const SSBO_BINDING_DOMAINS: u32 = ssbo_binding!(Rendrs_Domains);
 
 pub const SSBO_GBANK_VERTEX: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_Vertex => {
         [dyn_array float : rendrs_gbank_vertex => each 3]
     }
 };
-
 pub const SSBO_GBANK_NOTA: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_NoTa => {
         [dyn_array vec4 : rendrs_gbank_nota]
     }
 };
-
 pub const SSBO_GBANK_TRIANGLE: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_Triangle => {
         [dyn_array uint : rendrs_gbank_triangle => each 3]
     }
 };
-
 pub const SSBO_GBANK_TRIANGLE_ATTRIBS: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_TriangleAttribs => {
         [dyn_array TriangleAttribs : rendrs_gbank_triangle_attribs]
     }
 };
-
 pub const SSBO_GBANK_GCOUNTER: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_GCounter => {
         rendrs_gbank_gcounter_vertex   : uint;
         rendrs_gbank_gcounter_triangle : uint;
+    }
+};
+pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
+    buf Rendrs_Domains => {
+        [dyn_array DomainData : rendrs_domains]
     }
 };
 
@@ -240,6 +245,7 @@ macro_rules! geometry_submission_job {
                     $crate::geometry::shader::SSBO_GBANK_TRIANGLE
                     $crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
+                    $crate::geometry::shader::SSBO_DOMAINS
 
                     $($($ssbo_glsl)+)?
                 };
@@ -323,7 +329,7 @@ macro_rules! geometry_submission_job {
 
                 src() {
                     "
-                    DomainData _domain /* = ssbo read */;
+                    DomainData _domain = rendrs_domains[gl_WorkGroupID.x];
 
                     uint _d_threads = _domain.thread_count;
                     if (gl_LocalInvocationID.x >= _d_threads) {

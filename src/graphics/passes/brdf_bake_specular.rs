@@ -15,6 +15,7 @@ pub fn brdf_bake_specular(shader: &ComputeShaderBrdfBakingSpecular, output: Text
         None,
     );
 
+    #[derive(Debug)]
     struct Ctx {
         resolution: u32,
     }

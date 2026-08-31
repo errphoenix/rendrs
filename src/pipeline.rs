@@ -615,8 +615,8 @@ impl OutputObject {
     }
 }
 
-pub trait CtxType {
-    type Ctx<'ctx>;
+pub trait CtxType: std::fmt::Debug {
+    type Ctx<'ctx>: std::fmt::Debug;
 }
 impl CtxType for () {
     type Ctx<'ctx> = ();

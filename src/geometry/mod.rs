@@ -2,9 +2,9 @@ use ethel::render::buffer::SingleBuffer;
 
 pub use dispatch::GeomPass;
 pub use shader::{
-    SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_NOTA, SSBO_BINDING_GBANK_TRIANGLE,
-    SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS, SSBO_BINDING_GBANK_VERTEX, TYPE_DOMAIN_DATA,
-    TYPE_TRIANGLE_ATTRIBS,
+    SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_NOTA,
+    SSBO_BINDING_GBANK_TRIANGLE, SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS, SSBO_BINDING_GBANK_VERTEX,
+    TYPE_DOMAIN_DATA, TYPE_TRIANGLE_ATTRIBS,
 };
 
 pub mod dispatch;
@@ -17,9 +17,8 @@ pub const DOMAIN_MAX_INDEX: u32 = 0xff;
 pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
 
 /// Max amount of domains submitted in a single geometry dispatch.
-///
-/// This is equal to the latest OpenGL minimum workgroup count.
-pub const MAX_DOMAIN_COUNT: u32 = 65535;
+pub const MAX_DOMAIN_COUNT: u32 = 131_070;
+pub const DOMAIN_SIZE: u32 = 64;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
