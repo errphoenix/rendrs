@@ -21,7 +21,45 @@ macro_rules! ssbo_binding {
     };
 }
 
+const DOMAIN_INDEX_BITSHIFT: u32 = 24;
+const DOMAIN_GEOID_BITMASK: u32 = u32::MAX >> (32 - DOMAIN_INDEX_BITSHIFT);
+
+pub const DOMAIN_MAX_INDEX: u32 = u8::MAX as u32;
+pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct DomainData {
+    pub idx8_geoid24: u32,
+    pub thread_count: u32,
+}
+impl DomainData {
+    pub const fn new(index: u8, geom_id: u32, thread_count: u32) -> Self {
+        let geoid24 = geom_id & DOMAIN_GEOID_BITMASK;
+        let idx8 = (index as u32) << DOMAIN_INDEX_BITSHIFT;
+        Self {
+            idx8_geoid24: idx8 | geoid24,
+            thread_count,
+        }
+    }
+
+    pub const fn index(self) -> u8 {
+        (self.idx8_geoid24 >> DOMAIN_INDEX_BITSHIFT) as u8
+    }
+
+    pub const fn geom_id(self) -> u32 {
+        self.idx8_geoid24 & DOMAIN_GEOID_BITMASK
+    }
+}
+ethel::shader_glsl_struct! {
+    struct DomainData {
+        idx4_geoid28 : u32 => uint
+        thread_count : u32 => uint
+    }
+}
+
 /// todo
+#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TriangleMetadata {
     pub geometry_id: u32,
@@ -32,6 +70,7 @@ ethel::shader_glsl_struct! {
     }
 }
 
+pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_METADATA: GlslStruct = TriangleMetadataGlslStruct::as_definition();
 
 /// Vertex buffer represented as `x, y, z` 32-bit floats.
@@ -179,7 +218,7 @@ impl GeometryBank {
 /// Create a geometry submission job to be attached to a geometry pass.
 ///
 /// This is a compute shader that runs arbitrary logic with the purpose of
-/// gathering, modifying, and submitting geometry.
+/// gathering, modifying, and submitting geometry organized with `domains`.
 ///
 /// The macro's syntax is similar to [`ethel's compute shaders`].
 ///
@@ -198,16 +237,20 @@ impl GeometryBank {
 /// The shader's source has access to the following parameters:
 /// * GLSL's standard compute shader variables (`gl_GlobalInvocationID`, etc.)*
 /// * `rendrs_GeometryID` the index of the current working geometric entity
-/// * If the geometry unit is set to `Triangle`:
-///   * `rendrs_GlobalTriangleID` the global index of the current working
-///     triangle
-///   * `rendrs_LocalTriangleID` the local index (to the current geometric
-///     entity) of the current working triangle
-///   * `rendrs_LocalVertexBase` the local offset (to the current geometric
-///     entity) matching the current working triangle, derived as
-///     `rendrs_LocalTriangleID * 3`.
+/// * `rendrs_DomainID` the local index of the current working domain of the
+///   current geometric entity
+/// * `rendrs_WorkGroupID` the global index of the current working domain,
+///   equal to `gl_WorkGroupID.x`
+/// * `rendrs_ThreadIndex` the thread index (invocation) local to the current
+///   working geometric entity
+/// * `rendrs_DomainThreadIndex` the thread index (invocation) local to the
+///   current working domain, equal to `gl_LocalInvocationID.x`
+/// * `rendrs_GlobalThreadIndex` the global thread index (invocation), equal
+///   to `gl_GlobalInvocationID.x`
 ///
-/// *Note that the shader's workgroup is of linear size 64 (x=64,y=1,z=1).
+/// *Note that the shader's workgroup (frequently referred to as `domain`) is
+/// of linear size 64 (x=64,y=1,z=1).
+///
 /// Threads that would be out-of-bounds return before reaching any geometry
 /// submission job.
 ///
@@ -250,7 +293,7 @@ impl GeometryBank {
 #[macro_export]
 macro_rules! geometry_submission_job {
     (
-        $name:ident unit $gkind:ident => {
+        $name:ident => {
             $(uniform {
                 $(length $u_len:literal, $u_gl_name:ident: $u_gl_type:ident => $u_r_type:ty;)+
             })?
@@ -291,6 +334,7 @@ macro_rules! geometry_submission_job {
                     $(on $idx $(, for $len)? => $ui_name : $image_type as $format $($m)* ; )+
                 };)?
                 type {
+                    TYPE_DOMAIN_DATA
                     TYPE_TRIANGLE_METADATA
 
                     $($($type_glsl)+)?
@@ -312,6 +356,20 @@ macro_rules! geometry_submission_job {
                     crate::pack::PACK_SPHERICAL_ENCODE;
                     crate::pack::PACK_SPHERICAL_DECODE;
 
+                    // domain data bit-packing helpers (internal)
+                    ethel::shader::GlslLib::new("
+                        const uint _iDOMAIN_INDEX_BITSHIFT = 24;
+                        const uint _iDOMAIN_GEOID_BITMASK = 0x00ffffff;
+
+                        uint _iDomain_unpackIndex(uint packed) {
+                            return packed >> _iDOMAIN_INDEX_BITSHIFT;
+                        }
+                        uint _iDomain_unpackGeoID(uint packed) {
+                            return packed & _iDOMAIN_GEOID_BITMASK;
+                        }
+                    ");
+
+                    // emit triangle function
                     ethel::shader::GlslLib::new("
                         uint Triangle(uint v0, uint v1, uint v2, uint geom_id) {
                             uint triangle_index = atomicAdd(rendrs_gbank_counter_triangle, 1);
@@ -327,6 +385,7 @@ macro_rules! geometry_submission_job {
                         }
                     ");
 
+                    // emit vertex functions
                     ethel::shader::GlslLib::new("
                         uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct) {
                             uint vertex_index = atomicAdd(rendrs_gbank_counter_vertex, 1);
@@ -349,10 +408,14 @@ macro_rules! geometry_submission_job {
                     ");
 
                     ethel::shader::GlslLib::new(concat!(
-                        "void _submitGeometry(",
-                        $crate::geometry_submission_job!(@unit_args $gkind),
-                        "in uint rendrs_GeometryID",
-                        ") {\n", $source, "\n}"
+                        "void _submitGeometry(
+                            in uint rendrs_GeometryID,
+                            in uint rendrs_ClusterID,
+                            in uint rendrs_WorkGroupID,
+                            in uint rendrs_ThreadIndex,
+                            in uint rendrs_ClusterThreadIndex,
+                            in uint rendrs_GlobalThreadIndex
+                        ) {\n", $source, "\n}"
                     ));
                 };
                 $(share {
@@ -361,24 +424,41 @@ macro_rules! geometry_submission_job {
 
                 src() {
                     "
-                    // resolve rendrs_* variables
-                    _submitGeometry(/**/);
+                    DomainData _domain /* = ssbo read */;
+
+                    uint _d_threads = _domain.thread_count;
+                    if (gl_LocalInvocationID.x >= _d_threads) {
+                        return;
+                    }
+
+                    uint _d_packed = _domain.idx8_geoid24;
+                    uint _d_index  = _iDomain_unpackIndex(_d_packed);
+                    uint _d_geoid  = _iDomain_unpackGeoID(_d_packed);
+
+                    const uint rendrs_GeometryID  = _d_geoid;
+                    const uint rendrs_ClusterID   = _d_index;
+                    const uint rendrs_WorkGroupID = gl_WorkGroupID.x;
+                    const uint rendrs_ThreadIndex = 64 * _d_index + gl_LocalInvocationID.x;
+                    const uint rendrs_ClusterThreadIndex = gl_LocalInvocationID.x;
+                    const uint rendrs_GlobalThreadIndex = gl_GlobalInvocationID.x;
+
+                    _submitGeometry(
+                        rendrs_GeometryID,
+                        rendrs_ClusterID,
+                        rendrs_WorkGroupID,
+                        rendrs_ThreadIndex,
+                        rendrs_ClusterThreadIndex,
+                        rendrs_GlobalThreadIndex
+                    );
                     ";
                 }
             }
         }}
     };
-
-    (@unit_args Geometry) => { "" };
-    (@unit_args Triangle) => { "
-        in uint rendrs_GlobalTriangleID,
-        in uint rendrs_LocalTriangleID,
-        in uint rendrs_LocalVertexBase,"
-    };
 }
 
 geometry_submission_job! {
-    Test unit Geometry => {
+    Test => {
         "test"
     }
 }
