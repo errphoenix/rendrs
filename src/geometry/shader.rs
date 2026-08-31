@@ -207,6 +207,9 @@ macro_rules! geometry_submission_job {
     ) => {
         paste::paste! {
 
+        const [< $name:upper GEOM_SAMPLER_COUNT >]: usize = $($(1 + $($s_len - 1 +)?)*)? 0;
+        const [< $name:upper GEOM_IMAGE_COUNT >]: usize = $($(1 + $($len - 1 +)?)*)? 0;
+
         #[derive(Debug)]
         pub struct [< $name GeomCtx >]<'ctx> {
             pub shader: &'ctx [< ComputeShader $name GeomSubmit >],
@@ -217,7 +220,8 @@ macro_rules! geometry_submission_job {
         pub type [< $name GeomPass >] = $crate::geometry::GeomPass<
             [< ComputeShader $name GeomSubmit >],
             [< $name GeomCtxWrapper >],
-            0, 0 // todo: sampler & image counts
+            [< $name:upper GEOM_SAMPLER_COUNT >],
+            [< $name:upper GEOM_IMAGE_COUNT >],
         >;
 
         ethel::shader_glsl_compute! {
