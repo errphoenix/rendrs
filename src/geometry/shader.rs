@@ -94,6 +94,9 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 /// The definition syntax for each of these is identical to
 /// [`ethel's compute shaders`].
 ///
+/// **NOTE**: Any additional SSBO must begin at index 5, as the first 4 binding indices
+/// are reserved for geometry data.
+///
 /// ## Context
 ///
 /// There is also an additional (also optional) block `context`: this is where
@@ -129,9 +132,9 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 ///   current geometric entity
 /// * `rendrs_WorkGroupID` the global index of the current working domain,
 ///   equal to `gl_WorkGroupID.x`
-/// * `rendrs_LaneIndex` the thread index (invocation) local to the current
+/// * `rendrs_ThreadID` the thread index (invocation) local to the current
 ///   working geometric entity
-/// * `rendrs_LocalThreadID` the thread index (invocation) local to the
+/// * `rendrs_DomainThreadID` the thread index (invocation) local to the
 ///   current working domain, equal to `gl_LocalInvocationID.x`
 /// * `rendrs_GlobalThreadID` the global thread index (invocation), equal
 ///   to `gl_GlobalInvocationID.x`
@@ -221,7 +224,7 @@ macro_rules! geometry_submission_job {
             pub shader: &'ctx [< ComputeShader $name GeomSubmit >],
             $($(pub $ctx_field: $(&$ctx_lt)? $ctx_type,)+)?
         }
-        crate::context_wrapper!(for<'ctx> [< $name GeomCtx >]);
+        $crate::context_wrapper!(for<'ctx> [< $name GeomCtx >]);
 
         pub type [< $name GeomPass >] = $crate::geometry::GeomPass<
             [< ComputeShader $name GeomSubmit >],
@@ -260,11 +263,11 @@ macro_rules! geometry_submission_job {
                     $($($ssbo_glsl)+)?
                 };
                 lib {
-                    crate::pack::PACK_OCTAHEDRON_WRAP_UTIL;
-                    crate::pack::PACK_OCTAHEDRON_ENCODE;
-                    crate::pack::PACK_OCTAHEDRON_DECODE;
-                    crate::pack::PACK_SPHERICAL_ENCODE;
-                    crate::pack::PACK_SPHERICAL_DECODE;
+                    $crate::pack::PACK_OCTAHEDRON_WRAP_UTIL;
+                    $crate::pack::PACK_OCTAHEDRON_ENCODE;
+                    $crate::pack::PACK_OCTAHEDRON_DECODE;
+                    $crate::pack::PACK_SPHERICAL_ENCODE;
+                    $crate::pack::PACK_SPHERICAL_DECODE;
 
                     // domain data bit-packing helpers (internal)
                     ethel::shader::GlslLib::new(
@@ -323,15 +326,15 @@ macro_rules! geometry_submission_job {
                     ",
                     );
 
-                    $($($e_lib)+)?
+                    $($($e_lib;)+)?
 
                     ethel::shader::GlslLib::new(concat!(
                         "void _submitGeometry(
                             in uint rendrs_GeometryID,
                             in uint rendrs_DomainIndex,
                             in uint rendrs_WorkGroupID,
-                            in uint rendrs_LaneIndex,
-                            in uint rendrs_LocalThreadID,
+                            in uint rendrs_ThreadID,
+                            in uint rendrs_DomainThreadID,
                             in uint rendrs_GlobalThreadID
                         ) {\n", $source, "\n}"
                     ));
@@ -356,16 +359,16 @@ macro_rules! geometry_submission_job {
                     const uint rendrs_GeometryID  = _d_geoid;
                     const uint rendrs_DomainIndex = _d_index;
                     const uint rendrs_WorkGroupID = gl_WorkGroupID.x;
-                    const uint rendrs_LaneIndex = 64 * _d_index + gl_LocalInvocationID.x;
-                    const uint rendrs_LocalThreadID = gl_LocalInvocationID.x;
+                    const uint rendrs_ThreadID = 64 * _d_index + gl_LocalInvocationID.x;
+                    const uint rendrs_DomainThreadID = gl_LocalInvocationID.x;
                     const uint rendrs_GlobalThreadID = gl_GlobalInvocationID.x;
 
                     _submitGeometry(
                         rendrs_GeometryID,
                         rendrs_DomainIndex,
                         rendrs_WorkGroupID,
-                        rendrs_LaneIndex,
-                        rendrs_LocalThreadID,
+                        rendrs_ThreadID,
+                        rendrs_DomainThreadID,
                         rendrs_GlobalThreadID
                     );
                     ";
