@@ -46,23 +46,12 @@ impl<'buf> DomainDataWriter<'buf> {
     }
 }
 
+#[derive(Debug)]
 pub struct GeomPass<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> {
     shader: CS,
     inner_pass: ComputePass<K, S, I>,
     domain_data: SingleBuffer<DomainData>,
     pre_dispatch: fn(StorageSection, &<K as CtxType>::Ctx<'_>, &mut DomainDataWriter),
-}
-impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> std::fmt::Debug
-    for GeomPass<CS, K, S, I>
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GeomPass")
-            .field("shader", &self.shader)
-            .field("inner_pass", &self.inner_pass)
-            .field("domain_data", &self.domain_data)
-            .field("pre_dispatch", &self.pre_dispatch)
-            .finish()
-    }
 }
 impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
     for GeomPass<CS, K, S, I>

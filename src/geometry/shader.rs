@@ -1,6 +1,20 @@
 use ethel::shader::{GlslStorage, GlslStruct};
 
 ethel::shader_glsl_struct! {
+    struct RenderVertex {
+        pos_x : f32 => float
+        pos_y : f32 => float
+        pos_z : f32 => float
+        norm_oct_x : f32 => float
+        norm_oct_y : f32 => float
+        tan_oct_x : f32 => float
+        tan_oct_y : f32 => float
+        uv_x : f32 => float
+        uv_y : f32 => float
+    }
+}
+
+ethel::shader_glsl_struct! {
     struct DomainData {
         idx8_geoid24 : u32 => uint
         thread_count : u32 => uint
@@ -13,45 +27,37 @@ ethel::shader_glsl_struct! {
     }
 }
 
+pub const TYPE_RENDERVERTEX: GlslStruct = RenderVertexGlslStruct::as_definition();
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 
 macro_rules! ssbo_binding {
-    (Rendrs_GBANK_Vertex) => {
+    (Rendrs_GBANK_RenderVertex) => {
         0
     };
-    (Rendrs_GBANK_NoTa) => {
+    (Rendrs_GBANK_Triangle) => {
         1
     };
-    (Rendrs_GBANK_Triangle) => {
+    (Rendrs_GBANK_TriangleAttribs) => {
         2
     };
-    (Rendrs_GBANK_TriangleAttribs) => {
+    (Rendrs_GBANK_GCounter) => {
         3
     };
-    (Rendrs_GBANK_GCounter) => {
-        4
-    };
     (Rendrs_Domains) => {
-        5
+        4
     };
 }
 
-pub const SSBO_BINDING_GBANK_VERTEX: u32 = ssbo_binding!(Rendrs_GBANK_Vertex);
-pub const SSBO_BINDING_GBANK_NOTA: u32 = ssbo_binding!(Rendrs_GBANK_NoTa);
+pub const SSBO_BINDING_GBANK_RENDERVERTEX: u32 = ssbo_binding!(Rendrs_GBANK_RenderVertex);
 pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_Triangle);
 pub const SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS: u32 = ssbo_binding!(Rendrs_GBANK_TriangleAttribs);
 pub const SSBO_BINDING_GBANK_GCOUNTER: u32 = ssbo_binding!(Rendrs_GBANK_GCounter);
 pub const SSBO_BINDING_DOMAINS: u32 = ssbo_binding!(Rendrs_Domains);
 
-pub const SSBO_GBANK_VERTEX: GlslStorage = ethel::shader_glsl_ssbo! {
-    buf Rendrs_GBANK_Vertex => {
-        [dyn_array float : rendrs_gbank_vertex => each 3]
-    }
-};
-pub const SSBO_GBANK_NOTA: GlslStorage = ethel::shader_glsl_ssbo! {
-    buf Rendrs_GBANK_NoTa => {
-        [dyn_array vec4 : rendrs_gbank_nota]
+pub const SSBO_GBANK_RENDERVERTEX: GlslStorage = ethel::shader_glsl_ssbo! {
+    buf Rendrs_GBANK_RenderVertex => {
+        [dyn_array RenderVertex : rendrs_gbank_vertex]
     }
 };
 pub const SSBO_GBANK_TRIANGLE: GlslStorage = ethel::shader_glsl_ssbo! {
@@ -152,13 +158,13 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 ///
 /// Geometry submission functions can submit arbitrary vertices and triangles
 /// data for rendering:
-/// * `uint Vertex(vec3 position, vec2 normal_oct, vec2 tangent_oct)`:
+/// * `uint Vertex(vec3 position, vec2 normal_oct, vec2 tangent_oct, vec2 uv)`:
 ///     Submits a vertex at `position` with the specified `normal` and
 ///     `tangent` vectors. The last 2 are octahedron-encoded.
 ///     Returns the index of the submitted vertex.
-/// * `uint Vertex(vec3 position, vec3 normal, vec3 tangent)`:
+/// * `uint Vertex(vec3 position, vec3 normal, vec3 tangent, vec2 uv)`:
 ///     Submits a vertex at `position` with the specified `normal` and
-///     `tangent` vectors. The last 2 are *not* octahedron-encoded, octahedron
+///     `tangent` vectors. These are *not* octahedron-encoded, octahedron
 ///     encoding is performed inside the function with `rendrs'` packing
 ///     functions.
 ///     Returns the index of the submitted vertex.
@@ -238,14 +244,14 @@ macro_rules! geometry_submission_job {
                     $(on $idx $(, for $len)? => $ui_name : $image_type as $format $($m)* ; )+
                 };)?
                 type {
+                    $crate::geometry::shader::TYPE_RENDERVERTEX
                     $crate::geometry::shader::TYPE_DOMAIN_DATA
                     $crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
 
                     $($($type_glsl)+)?
                 };
                 ssbo {
-                    $crate::geometry::shader::SSBO_GBANK_VERTEX
-                    $crate::geometry::shader::SSBO_GBANK_NOTA
+                    $crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
                     $crate::geometry::shader::SSBO_GBANK_TRIANGLE
                     $crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
@@ -293,12 +299,15 @@ macro_rules! geometry_submission_job {
                     // emit vertex functions
                     ethel::shader::GlslLib::new(
                         "
-                        uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct) {
+                        uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
                             uint vertex_index = atomicAdd(rendrs_gbank_gcounter_vertex, 1);
 
-                            rendrs_gbank_vertex[vertex_index][0] = p.x;
-                            rendrs_gbank_vertex[vertex_index][1] = p.y;
-                            rendrs_gbank_vertex[vertex_index][2] = p.z;
+                            rendrs_gbank_vertex[vertex_index] = RenderVertex(
+                                p.x, p.y, p.z,
+                                n_oct.x, n_oct.y,
+                                t_oct.x, t_oct.y,
+                                uv.x, uv.y
+                            );
 
                             vec4 nota = vec4(n_oct.x, n_oct.y, t_oct.x, t_oct.y);
                             rendrs_gbank_nota[vertex_index] = nota;
@@ -306,10 +315,10 @@ macro_rules! geometry_submission_job {
                             return vertex_index;
                         }
 
-                        uint Vertex(vec3 p, vec3 n, vec3 t) {
+                        uint Vertex(vec3 p, vec3 n, vec3 t, vec2 uv) {
                             vec2 n_oct = rendrs_packOctahedron(n);
                             vec2 t_oct = rendrs_packOctahedron(t);
-                            return Vertex(p, n_oct, t_oct);
+                            return Vertex(p, n_oct, t_oct, uv);
                         }
                     ",
                     );
@@ -364,10 +373,4 @@ macro_rules! geometry_submission_job {
             }
         }}
     };
-}
-
-geometry_submission_job! {
-    Test => {
-        "test"
-    }
 }
