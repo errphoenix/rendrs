@@ -79,6 +79,18 @@ impl GeomRasterizePass {
         }
     }
 
+    pub fn output(&self) -> &OutputObject {
+        self.inner.output(0)
+    }
+
+    pub fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.inner.revalidate(render_pool);
+    }
+
+    pub const fn shader(&self) -> &ShaderGeomRasterize {
+        &self.shader
+    }
+
     pub fn execute(
         &self,
         render_pool: &RenderPool,

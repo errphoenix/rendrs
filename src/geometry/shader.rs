@@ -221,7 +221,6 @@ macro_rules! geometry_submission_job {
 
         #[derive(Debug)]
         pub struct [< $name GeomCtx >]<'ctx> {
-            pub shader: &'ctx [< ComputeShader $name GeomSubmit >],
             $($(pub $ctx_field: $(&$ctx_lt)? $ctx_type,)+)?
         }
         $crate::context_wrapper!(for<'ctx> [< $name GeomCtx >]);

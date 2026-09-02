@@ -46,12 +46,15 @@ impl<'buf> DomainDataWriter<'buf> {
     }
 }
 
+pub type GeomDispatchFn<CS, K> =
+    fn(StorageSection, &CS, &<K as CtxType>::Ctx<'_>, &mut DomainDataWriter);
+
 #[derive(Debug)]
 pub struct GeomPass<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> {
     shader: CS,
     inner_pass: ComputePass<K, S, I>,
     domain_data: SingleBuffer<DomainData>,
-    pre_dispatch: fn(StorageSection, &<K as CtxType>::Ctx<'_>, &mut DomainDataWriter),
+    pre_dispatch: GeomDispatchFn<CS, K>,
 }
 impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
     for GeomPass<CS, K, S, I>
@@ -64,6 +67,8 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         self.inner_pass.revalidate(render_pool);
     }
 
+    /// Caller must ensure the [`GeometryBank`]'s SSBO bindings are active
+    /// and that this pass will not override any binding from 0 to 4.
     fn execute(
         &self,
         frame_index: StorageSection,
@@ -75,7 +80,8 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         self.bind_images();
 
         let mut writer = unsafe { DomainDataWriter::new(&self.domain_data) };
-        (self.pre_dispatch)(frame_index, ctx, &mut writer);
+        let shader = &self.shader;
+        (self.pre_dispatch)(frame_index, shader, ctx, &mut writer);
         let domain_count = writer.len();
         if domain_count < 1 {
             return;
@@ -101,7 +107,7 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> GeomPass<CS,
         shader: CS,
         samplers: [Sampler; S],
         images: [ImageObjectTarget; I],
-        pre_dispatch: fn(StorageSection, &<K as CtxType>::Ctx<'_>, &mut DomainDataWriter),
+        pre_dispatch: GeomDispatchFn<CS, K>,
     ) -> Self {
         let handle_view = shader.compute_handle().view();
         Self {
