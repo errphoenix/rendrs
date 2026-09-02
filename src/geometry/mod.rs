@@ -8,6 +8,7 @@ pub use shader::{
 };
 
 pub mod dispatch;
+pub mod rasterize;
 pub mod shader;
 
 const DOMAIN_INDEX_BITSHIFT: u32 = 24;
