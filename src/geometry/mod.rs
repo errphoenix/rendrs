@@ -1,6 +1,9 @@
 use ethel::render::buffer::SingleBuffer;
 
 pub use dispatch::GeomPass;
+pub use rasterize::{
+    GeomRasterizePass, barrier_geom_compose, barrier_geom_rasterize, geom_rasterize_target,
+};
 pub use shader::{
     SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_RENDERVERTEX,
     SSBO_BINDING_GBANK_TRIANGLE, SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS, TYPE_DOMAIN_DATA,
