@@ -7,8 +7,10 @@ use ethel::shader::GlslLib;
 pub const PACK_OCTAHEDRON_WRAP_UTIL: GlslLib = ethel::shader_glsl_lib! {
     vec2 rendrs_wrapOctahedron [ v : vec2 ] => "
         return
-            (1.0 - abs(v.xy)) *
-            (v.xy >= 0.0 ? 1.0 : - 1.0)
+            (1.0 - abs(v.xy)) * vec2(
+                v.x >= 0.0 ? 1.0 : - 1.0,
+                v.y >= 0.0 ? 1.0 : - 1.0
+            )
         ;
     "
 };
@@ -25,7 +27,7 @@ pub const PACK_OCTAHEDRON_WRAP_UTIL: GlslLib = ethel::shader_glsl_lib! {
 pub const PACK_OCTAHEDRON_ENCODE: GlslLib = ethel::shader_glsl_lib! {
     vec2 rendrs_packOctahedron [ n : vec3 ] => "
         n /= (abs(n.x) + abs(n.y) + abs(n.z));
-        n.xy = n.z >= 0.0 ? n.xy : octahedronWrap(n.xy);
+        n.xy = n.z >= 0.0 ? n.xy : rendrs_wrapOctahedron(n.xy);
         return n.xy * 0.5 + 0.5;
     "
 };
@@ -39,7 +41,10 @@ pub const PACK_OCTAHEDRON_DECODE: GlslLib = ethel::shader_glsl_lib! {
         f = f * 2.0 - 1.0;
         vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
         float t = clamp(-n.x, 0.0, 1.0);
-        n.xy += n.xy >= 0.0 ? -t : t;
+        n.xy += vec2(
+            n.x >= 0.0 ? -t : t,
+            n.y >= 0.0 ? -t : t
+        );
         return normalize(n);
     "
 };
@@ -59,7 +64,7 @@ pub const PACK_SPHERICAL_ENCODE: GlslLib = ethel::shader_glsl_lib! {
     vec2 rendrs_packSpherical [ n : vec3 ] => "
         //todo: rewrite?
         vec2 f;
-        f.x = atan2(n.y, n.x) * 0.318309886184;
+        f.x = atan(n.y, n.x) * 0.318309886184;
         f.y = n.z;
         return f * 0.5 + 0.5;
     "
@@ -76,7 +81,7 @@ pub const PACK_SPHERICAL_DECODE: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_unpackSpherical [ f : vec2 ] => "
         //todo: rewrite?
         vec2 ang = f * 2.0 - 1.0;
-        float xpi = ang.x * 3.14159265358979323846264338327950288;
+        float xpi = ang.x * 3.1415926;
         vec2 scth = vec2(
             sin(xpi),
             cos(xpi)
