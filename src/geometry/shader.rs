@@ -72,8 +72,8 @@ pub const SSBO_GBANK_TRIANGLE_ATTRIBS: GlslStorage = ethel::shader_glsl_ssbo! {
 };
 pub const SSBO_GBANK_GCOUNTER: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_GCounter => {
-        rendrs_gbank_gcounter_vertex   : uint;
-        rendrs_gbank_gcounter_triangle : uint;
+        uint : rendrs_gbank_gcounter_vertex;
+        uint : rendrs_gbank_gcounter_triangle;
     }
 };
 pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
@@ -96,6 +96,9 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 ///
 /// **NOTE**: Any additional SSBO must begin at index 5, as the first 4 binding indices
 /// are reserved for geometry data.
+///
+/// (Also ensure no types are named exactly 'Vertex' or 'Triangle', as these
+/// named are already used for functions)
 ///
 /// ## Context
 ///
@@ -269,20 +272,20 @@ macro_rules! geometry_submission_job {
                     $crate::pack::PACK_SPHERICAL_DECODE;
 
                     // domain data bit-packing helpers (internal)
-                    ethel::shader::GlslLib::new(
+                    ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         const uint _iDOMAIN_INDEX_BITSHIFT = 24;
                         const uint _iDOMAIN_GEOID_BITMASK = 0x00ffffff;
 
-                        uint _iDomain_unpackIndex(uint packed) {
-                            return packed >> _iDOMAIN_INDEX_BITSHIFT;
+                        uint _iDomain_unpackIndex(uint idx8_geoid24) {
+                            return idx8_geoid24 >> _iDOMAIN_INDEX_BITSHIFT;
                         }
-                        uint _iDomain_unpackGeoID(uint packed) {
-                            return packed & _iDOMAIN_GEOID_BITMASK;
-                        }",
-                    );
+                        uint _iDomain_unpackGeoID(uint idx8_geoid24) {
+                            return idx8_geoid24 & _iDOMAIN_GEOID_BITMASK;
+                        }"
+                    });
                     // emit triangle function
-                    ethel::shader::GlslLib::new(
+                    ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         uint Triangle(uint v0, uint v1, uint v2, uint geom_id) {
                             uint triangle_index = atomicAdd(rendrs_gbank_gcounter_triangle, 1);
@@ -295,11 +298,10 @@ macro_rules! geometry_submission_job {
                             rendrs_gbank_triangle_attribs[triangle_index] = attribs;
 
                             return triangle_index;
-                        }
-                    ",
-                    );
+                        }"
+                    });
                     // emit vertex functions
-                    ethel::shader::GlslLib::new(
+                    ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
                             uint vertex_index = atomicAdd(rendrs_gbank_gcounter_vertex, 1);
@@ -311,9 +313,6 @@ macro_rules! geometry_submission_job {
                                 uv.x, uv.y
                             );
 
-                            vec4 nota = vec4(n_oct.x, n_oct.y, t_oct.x, t_oct.y);
-                            rendrs_gbank_nota[vertex_index] = nota;
-
                             return vertex_index;
                         }
 
@@ -321,13 +320,12 @@ macro_rules! geometry_submission_job {
                             vec2 n_oct = rendrs_packOctahedron(n);
                             vec2 t_oct = rendrs_packOctahedron(t);
                             return Vertex(p, n_oct, t_oct, uv);
-                        }
-                    ",
-                    );
+                        }"
+                    });
 
                     $($($e_lib;)+)?
 
-                    ethel::shader::GlslLib::new(concat!(
+                    ethel::shader::GlslLib::new(indoc::concatdoc! {
                         "void _submitGeometry(
                             in uint rendrs_GeometryID,
                             in uint rendrs_DomainIndex,
@@ -336,7 +334,7 @@ macro_rules! geometry_submission_job {
                             in uint rendrs_DomainThreadID,
                             in uint rendrs_GlobalThreadID
                         ) {\n", $source, "\n}"
-                    ));
+                    });
                 };
                 $(share {
                     $($share_t:ident $share_n:ident $([$arr_c:expr])*;)*
