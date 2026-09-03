@@ -88,7 +88,7 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         }
         if domain_count as u32 >= super::MAX_DOMAIN_COUNT {
             tracing::error!(
-                "failed to dispatch geometry job: too many domains {}",
+                "failed to dispatch geometry composition job: too many domains {}",
                 domain_count
             );
             return;

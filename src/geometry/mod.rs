@@ -102,6 +102,12 @@ impl GeometryBank {
         }
     }
 
+    pub fn clear_gcounters(&self) {
+        unsafe {
+            self.gcounter.blit(&[[0, 0]], 0);
+        }
+    }
+
     pub const fn vertex_cap(&self) -> usize {
         self.vertex_cap
     }

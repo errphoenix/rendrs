@@ -1,6 +1,6 @@
 use ethel::{
     render::{Resolution, buffer::StorageSection},
-    shader::ShaderKind,
+    shader::{ShaderKind, ShaderProgram},
 };
 use janus::texture::{ImageFormat, ImageType, MipLevels, TextureFiltering};
 
@@ -43,38 +43,52 @@ pub fn geom_rasterize_target(
 
 #[derive(Debug)]
 pub struct GeomRasterizePass {
-    inner: DrawPass<GeomRasterizeCtxWrapper, 0, 1>,
+    inner: DrawPass<GeomRasterizeCtxWrapper, 0, 2>,
     shader: ShaderGeomRasterize,
 }
 impl GeomRasterizePass {
-    /// Expects an RG32UI `output` color attachment, as returned by
-    /// [`geom_rasterize_target`].
-    pub fn new(output: OutputObject) -> Self {
+    /// Expects an RG32UI `raster_out` color attachment, as returned by
+    /// [`geom_rasterize_target`] and a depth attachment.
+    pub fn new(raster_out: OutputObject, depth_out: OutputObject) -> Self {
         let shader = ShaderGeomRasterize::new_compiled();
         Self {
-            inner: DrawPass::new(shader.handle().view(), [], [output], |_, ctx| {
-                let GeomRasterizeCtx {
-                    gbank,
-                    shader,
-                    m_proj,
-                    m_view,
-                } = ctx;
+            inner: DrawPass::new(
+                shader.handle().view(),
+                [],
+                [raster_out, depth_out],
+                |_, ctx| {
+                    let GeomRasterizeCtx {
+                        gbank,
+                        shader,
+                        m_proj,
+                        m_view,
+                    } = ctx;
 
-                shader.uniform_proj_mat_mat4v([*m_proj]);
-                shader.uniform_view_mat_mat4v([*m_view]);
+                    // ethel shader uniform interface seems to not
+                    // work (likely due to array/mat4 mismatch?)
+                    // shader.uniform_proj_mat_mat4v([*m_proj]);
+                    // shader.uniform_view_mat_mat4v([*m_view]);
+                    let l0 = shader.find_uniform_location("proj_mat");
+                    let l1 = shader.find_uniform_location("view_mat");
+                    unsafe {
+                        janus::gl::UniformMatrix4fv(l0.get(), 1, janus::gl::FALSE, m_proj.as_ptr());
+                        janus::gl::UniformMatrix4fv(l1.get(), 1, janus::gl::FALSE, m_view.as_ptr());
+                    }
 
-                // SAFETY: safe access to the gcounter ssbo is only guaranteed
-                // if the geometry composition pass has finished writing to it.
-                // This is the caller's responsability.
-                let gcounter = unsafe { gbank.gcounter_buffer().view() };
-                let [v_counter, _t_counter] = gcounter[0];
+                    //fix: compute/indirect draw; v_counter read *may* be stale
+                    // SAFETY: safe access to the gcounter ssbo is only guaranteed
+                    // if the geometry composition pass has finished writing to it.
+                    // This is the caller's responsability.
+                    let gcounter = unsafe { gbank.gcounter_buffer().view() };
+                    let [v_counter, _t_counter] = gcounter[0];
 
-                gbank.bind_data_buffers();
+                    gbank.bind_data_buffers();
 
-                unsafe {
-                    janus::gl::DrawArrays(janus::gl::TRIANGLES, 0, v_counter as i32);
-                }
-            }),
+                    unsafe {
+                        janus::gl::DrawArrays(janus::gl::TRIANGLES, 0, v_counter as i32);
+                    }
+                },
+            ),
             shader,
         }
     }
@@ -174,7 +188,7 @@ ethel::shader_glsl! {
             }
         ];
 
-        // assumes rg32 output
+        // assumes rg32ui output
         unit ShaderKind::Pixel => [
             attribs {
                 ethel::shader_glsl_attribs! {
