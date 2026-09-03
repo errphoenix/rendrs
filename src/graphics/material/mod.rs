@@ -63,7 +63,7 @@ impl MaterialGroup {
     #[cfg(not(test))]
     #[cfg(feature = "pipeline")]
     pub const fn sampler(&self) -> SamplerObject {
-        SamplerObject::new(self.array_texture_object.view())
+        SamplerObject::from_texture(self.array_texture_object.view())
     }
 
     #[cfg(not(test))]
@@ -107,7 +107,8 @@ impl<const GROUPS: usize> MaterialGroups<GROUPS> {
     #[cfg(feature = "pipeline")]
     pub fn as_samplers(&self) -> [SamplerObject; GROUPS] {
         use janus::texture::TextureKind;
-        let mut samplers = [SamplerObject::new(TextureView::null(TextureKind::Dim2DArray)); GROUPS];
+        let mut samplers =
+            [SamplerObject::from_texture(TextureView::null(TextureKind::Dim2DArray)); GROUPS];
         self.groups
             .iter()
             .enumerate()

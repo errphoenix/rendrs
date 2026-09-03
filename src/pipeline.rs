@@ -1,12 +1,11 @@
 use ethel::{
     render::{Resolution, buffer::StorageSection},
-    shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
+    shader::{ComputeShaderHandleView, ShaderHandleView, ShaderKind, ShaderProgram},
 };
 use janus::{
     GlProperty, GpuResource,
     texture::{
-        AsTexView, ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind,
-        TextureView,
+        ImageFormat, ImageType, MipLevels, Tex, Texture, TextureFiltering, TextureKind, TextureView,
     },
 };
 
@@ -481,26 +480,48 @@ impl Sampler {
         Self::wrap(object, 0)
     }
 
-    pub const fn new_unit0(texture: TextureView) -> Self {
-        Self::new(texture, 0)
+    pub const fn from_texture_unit0(texture: TextureView) -> Self {
+        Self::from_texture(texture, 0)
     }
 
     /// Will panic if `unit` is `>= 16` when `debug_assertions` is enabled.
-    pub const fn new(texture: TextureView, unit: u32) -> Self {
-        debug_assert!(unit < 16, "maximum allowed texture units is 16");
+    pub const fn from_texture(texture: TextureView, unit: u32) -> Self {
         Self {
-            inner: SamplerObject::new(texture),
+            inner: SamplerObject::from_texture(texture),
             unit,
         }
     }
 
-    pub fn from_texture(texture: &impl AsTexView, unit: u32) -> Self {
-        Self::new(texture.as_texture_view(), unit)
+    pub const fn from_texture_with_mip_view(
+        texture: TextureView,
+        unit: u32,
+        mip_view: i32,
+    ) -> Self {
+        Self {
+            inner: SamplerObject::from_texture_with_mip_view(texture, mip_view),
+            unit,
+        }
     }
 
-    pub fn with_mip_view(texture: TextureView, unit: u32, mip_view: i32) -> Self {
+    pub const fn from_pool_target_unit0(accessor: RenderTargetAccessor) -> Self {
+        Self::from_pool_target(accessor, 0)
+    }
+
+    /// Will panic if `unit` is `>= 16` when `debug_assertions` is enabled.
+    pub const fn from_pool_target(accessor: RenderTargetAccessor, unit: u32) -> Self {
         Self {
-            inner: SamplerObject::with_mip_view(texture, mip_view),
+            inner: SamplerObject::from_pool_target(accessor),
+            unit,
+        }
+    }
+
+    pub const fn from_pool_target_with_mip_view(
+        accessor: RenderTargetAccessor,
+        unit: u32,
+        mip_view: i32,
+    ) -> Self {
+        Self {
+            inner: SamplerObject::from_pool_target_with_mip_view(accessor, mip_view),
             unit,
         }
     }
@@ -514,63 +535,163 @@ impl Sampler {
     }
 
     pub const fn mip_view(&self) -> Option<i32> {
-        self.inner.mip_level
+        self.inner.mip_view()
     }
 
     pub fn bind(&self) {
         self.inner.bind(self.unit);
     }
+
+    pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
+        self.inner.revalidate_if_pooled(render_pool);
+    }
+
+    pub const fn is_pool_target(&self) -> bool {
+        self.inner.is_pool_target()
+    }
+
+    pub const fn is_direct_texture(&self) -> bool {
+        self.inner.is_direct_texture()
+    }
+
+    pub const fn accessor(&self) -> Option<RenderTargetAccessor> {
+        self.inner.accessor()
+    }
+
+    pub const fn accessor_mut(&mut self) -> Option<&mut RenderTargetAccessor> {
+        self.inner.accessor_mut()
+    }
 }
 
 /// An uniform sampler object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SamplerObject {
-    inner: TextureView,
-    mip_level: Option<i32>,
+pub enum SamplerObject {
+    PoolTarget {
+        render_target_accessor: RenderTargetAccessor,
+        mip_level: Option<i32>,
+    },
+    DirectTexture {
+        texture_view: TextureView,
+        mip_level: Option<i32>,
+    },
 }
 impl SamplerObject {
-    pub fn from_texture(texture: &impl AsTexView) -> Self {
-        Self::new(texture.as_texture_view())
-    }
-
-    pub const fn new(texture: TextureView) -> Self {
-        Self {
-            inner: texture,
-            mip_level: None,
-        }
-    }
-
-    pub const fn with_mip_view(texture: TextureView, mip_view: i32) -> Self {
-        Self {
-            inner: texture,
+    pub const fn from_texture_with_mip_view(texture: TextureView, mip_view: i32) -> Self {
+        Self::DirectTexture {
+            texture_view: texture,
             mip_level: Some(mip_view),
         }
     }
 
+    pub const fn from_pool_target(accessor: RenderTargetAccessor) -> Self {
+        Self::PoolTarget {
+            render_target_accessor: accessor,
+            mip_level: None,
+        }
+    }
+
+    pub const fn from_pool_target_with_mip_view(
+        accessor: RenderTargetAccessor,
+        mip_view: i32,
+    ) -> Self {
+        Self::PoolTarget {
+            render_target_accessor: accessor,
+            mip_level: Some(mip_view),
+        }
+    }
+
+    pub const fn from_texture(texture: TextureView) -> Self {
+        Self::DirectTexture {
+            texture_view: texture,
+            mip_level: None,
+        }
+    }
+
+    pub fn revalidate_if_pooled(&mut self, render_pool: &RenderPool) {
+        if let Self::PoolTarget {
+            render_target_accessor,
+            ..
+        } = self
+        {
+            render_target_accessor.revalidate(render_pool);
+        }
+    }
+
+    pub const fn is_pool_target(&self) -> bool {
+        matches!(self, Self::PoolTarget { .. })
+    }
+
+    pub const fn is_direct_texture(&self) -> bool {
+        matches!(self, Self::DirectTexture { .. })
+    }
+
+    pub const fn accessor(&self) -> Option<RenderTargetAccessor> {
+        match self {
+            Self::PoolTarget {
+                render_target_accessor,
+                ..
+            } => Some(*render_target_accessor),
+            Self::DirectTexture { .. } => None,
+        }
+    }
+
+    pub const fn accessor_mut(&mut self) -> Option<&mut RenderTargetAccessor> {
+        match self {
+            Self::PoolTarget {
+                render_target_accessor,
+                ..
+            } => Some(render_target_accessor),
+            Self::DirectTexture { .. } => None,
+        }
+    }
+
     pub const fn texture(&self) -> TextureView {
-        self.inner
+        match self {
+            Self::PoolTarget {
+                render_target_accessor,
+                ..
+            } => render_target_accessor.texture,
+            Self::DirectTexture { texture_view, .. } => *texture_view,
+        }
     }
 
     /// The forced mip-level view, applied before sampling.
     pub const fn mip_view(&self) -> Option<i32> {
-        self.mip_level
+        match self {
+            SamplerObject::PoolTarget { mip_level, .. } => *mip_level,
+            SamplerObject::DirectTexture { mip_level, .. } => *mip_level,
+        }
     }
 
     pub fn bind(&self, unit: u32) {
-        self.set_mip_view();
-        self.inner.bind(unit);
-    }
-
-    fn set_mip_view(&self) {
-        if let Some(mip) = self.mip_level {
-            self.inner.set_mip_level_only(mip);
-        } else {
-            self.restore_mips();
+        match self {
+            SamplerObject::PoolTarget {
+                render_target_accessor,
+                mip_level,
+            } => {
+                if let Some(mip) = mip_level {
+                    self.texture().set_mip_level_only(*mip);
+                } else {
+                    self.restore_mips();
+                }
+                render_target_accessor.texture.bind(unit);
+            }
+            SamplerObject::DirectTexture {
+                texture_view,
+                mip_level,
+            } => {
+                if let Some(mip) = mip_level {
+                    self.texture().set_mip_level_only(*mip);
+                } else {
+                    self.restore_mips();
+                }
+                texture_view.bind(unit);
+            }
         }
     }
 
     fn restore_mips(&self) {
-        self.inner.set_mip_level_unbound();
+        self.texture().set_mip_level_unbound();
     }
 }
 
@@ -671,6 +792,10 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
     }
 
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.samplers
+            .iter_mut()
+            .for_each(|sampler| sampler.revalidate_if_pooled(render_pool));
+
         if O == 0 {
             return;
         }
@@ -817,6 +942,9 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
     }
 
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.samplers
+            .iter_mut()
+            .for_each(|sampler| sampler.revalidate_if_pooled(render_pool));
         self.images
             .iter_mut()
             .for_each(|image| image.revalidate_if_pooled(render_pool));
@@ -999,5 +1127,116 @@ impl BlitPass {
 
     pub const fn set_source(&mut self, source: RenderTargetAccessor) -> RenderTargetAccessor {
         std::mem::replace(&mut self.source, source)
+    }
+}
+
+#[derive(Debug)]
+pub struct QuadBlitPass {
+    inner: DrawPass<EmptyPassCtx, 1, 0>,
+    shader: ShaderQuadBlit,
+}
+impl Pass<EmptyPassCtx> for QuadBlitPass {
+    fn shader(&self) -> impl ShaderProgram {
+        self.shader.handle().view()
+    }
+
+    fn revalidate(&mut self, render_pool: &RenderPool) {
+        self.inner.revalidate(render_pool);
+    }
+
+    fn execute(
+        &self,
+        frame_index: StorageSection,
+        render_pool: &RenderPool,
+        ctx: &<EmptyPassCtx as CtxType>::Ctx<'_>,
+    ) {
+        self.inner.execute(frame_index, render_pool, ctx);
+    }
+}
+impl QuadBlitPass {
+    pub fn new(src: SamplerObject) -> Self {
+        let shader = ShaderQuadBlit::new_compiled();
+        Self {
+            inner: DrawPass::new(
+                shader.handle().view(),
+                [Sampler::wrap_unit0(src)],
+                [],
+                |_, _| unsafe {
+                    janus::gl::DrawArrays(janus::gl::TRIANGLES, 0, 6);
+                },
+            ),
+            shader,
+        }
+    }
+
+    pub const fn inner(&self) -> &DrawPass<EmptyPassCtx, 1, 0> {
+        &self.inner
+    }
+
+    pub const fn inner_shader(&self) -> &ShaderQuadBlit {
+        &self.shader
+    }
+}
+
+ethel::shader_glsl! {
+    struct QuadBlit > [460] {
+        common {};
+
+        unit ShaderKind::Vertex => [
+            attribs {
+                ethel::shader_glsl_attribs! {
+                    output uv : vec2;
+                }
+            };
+
+            src() {
+                "
+                vec2 vertex;
+                switch(gl_VertexID) {
+                    case 0:
+                        vertex = vec2(-1.0, -1.0);
+                        break;
+                    case 1:
+                        vertex = vec2(-1.0,  1.0);
+                        break;
+                    case 2:
+                        vertex = vec2( 1.0,  1.0);
+                        break;
+                    case 3:
+                        vertex = vec2( 1.0,  1.0);
+                        break;
+                    case 4:
+                        vertex = vec2( 1.0, -1.0);
+                        break;
+                    case 5:
+                        vertex = vec2(-1.0, -1.0);
+                        break;
+                }
+
+                uv = vertex;
+
+                gl_Position = vec4(vertex.x, vertex.y, 0.0, 1.0);
+                ";
+            }
+        ];
+
+        unit ShaderKind::Pixel => [
+            attribs {
+                ethel::shader_glsl_attribs! {
+                    input  uv       : vec2;
+                    output outColor : vec4;
+                }
+            };
+
+            sampler {
+                on 0 => blit_src : sampler2D;
+            };
+
+            src() {
+                "
+                outColor = texture(blit_src, uv);
+                ";
+            }
+        ];
     }
 }
