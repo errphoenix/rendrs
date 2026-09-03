@@ -1,5 +1,5 @@
 use ethel::{
-    render::buffer::{SingleBuffer, StorageSection, ViewMut},
+    render::buffer::{SingleBuffer, StorageSection},
     shader::{ComputeShader, ShaderProgram},
 };
 
@@ -11,27 +11,36 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DomainDataWriter<'buf> {
-    data: ViewMut<'buf, DomainData>,
+    dst_buf: &'buf SingleBuffer<DomainData>,
     write_len: usize,
 }
 impl<'buf> DomainDataWriter<'buf> {
     pub const unsafe fn new(ssbo: &'buf SingleBuffer<DomainData>) -> Self {
-        let view = unsafe { ssbo.view_mut() };
         Self {
-            data: view,
+            dst_buf: ssbo,
             write_len: 0,
         }
     }
 
-    pub const fn write(&mut self, data: DomainData) -> bool {
-        let index = self.write_len;
+    pub fn blit(&mut self, data: &[DomainData]) {
+        let offset = self.write_len;
+        let len = data.len();
+        unsafe {
+            let ptr = self.dst_buf.raw().add(offset);
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, len);
+        }
+        self.write_len = len;
+    }
 
+    pub fn write(&mut self, data: DomainData) -> bool {
+        let index = self.write_len;
         if index as u32 >= super::MAX_DOMAIN_COUNT {
             return false;
         }
 
         unsafe {
-            self.data.as_mut_ptr().add(index).write(data);
+            let ptr = self.dst_buf.raw().add(index);
+            std::ptr::copy_nonoverlapping(&data, ptr, 1);
         }
         self.write_len += 1;
         true

@@ -1,6 +1,10 @@
 use ethel::{
-    render::{Resolution, buffer::StorageSection},
-    shader::{ShaderKind, ShaderProgram},
+    render::{
+        Resolution,
+        buffer::{InitStrategy, SingleBuffer, StorageSection},
+        command::{DrawArraysIndirectCommand, GpuCommandDispatch},
+    },
+    shader::{GlslStruct, ShaderKind, ShaderProgram},
 };
 use janus::texture::{ImageFormat, ImageType, MipLevels, TextureFiltering};
 
@@ -24,12 +28,14 @@ pub fn barrier_geom_rasterize() {
     janus::gl::barrier_framebuffers();
 }
 
+/// Returns an `RG32UI` [`RenderTarget`] for the geometry rasterization pass
+/// color output.
 pub fn geom_rasterize_target(
     resolution: Resolution,
     resolution_relative_scale: f32,
 ) -> RenderTarget {
     RenderTarget::new(
-        "rendrs_target.geometry_rasterize",
+        "rendrs_target.geometry.rasterize",
         RenderTargetDescriptor::new(
             ImageFormat::DualChannelInteger,
             ImageType::Integer32U,
@@ -45,51 +51,65 @@ pub fn geom_rasterize_target(
 pub struct GeomRasterizePass {
     inner: DrawPass<GeomRasterizeCtxWrapper, 0, 2>,
     shader: ShaderGeomRasterize,
+    cpy_shader: ComputeShaderGeomRasterCpyOpts,
+    opts_buffer: SingleBuffer<DrawArraysIndirectCommand>, //more opts?
 }
 impl GeomRasterizePass {
     /// Expects an RG32UI `raster_out` color attachment, as returned by
     /// [`geom_rasterize_target`] and a depth attachment.
     pub fn new(raster_out: OutputObject, depth_out: OutputObject) -> Self {
         let shader = ShaderGeomRasterize::new_compiled();
+        let cpy_shader = ComputeShaderGeomRasterCpyOpts::new_compiled();
+
+        const DEFAULT_DRAW_CMD: DrawArraysIndirectCommand = DrawArraysIndirectCommand {
+            count: 0,
+            instance_count: 1,
+            first_vertex: 0,
+            base_instance: 0,
+        };
+        let handle_view = shader.handle().view();
+
         Self {
-            inner: DrawPass::new(
-                shader.handle().view(),
-                [],
-                [raster_out, depth_out],
-                |_, ctx| {
-                    let GeomRasterizeCtx {
-                        gbank,
-                        shader,
-                        m_proj,
-                        m_view,
-                    } = ctx;
-
-                    // ethel shader uniform interface seems to not
-                    // work (likely due to array/mat4 mismatch?)
-                    // shader.uniform_proj_mat_mat4v([*m_proj]);
-                    // shader.uniform_view_mat_mat4v([*m_view]);
-                    let l0 = shader.find_uniform_location("proj_mat");
-                    let l1 = shader.find_uniform_location("view_mat");
-                    unsafe {
-                        janus::gl::UniformMatrix4fv(l0.get(), 1, janus::gl::FALSE, m_proj.as_ptr());
-                        janus::gl::UniformMatrix4fv(l1.get(), 1, janus::gl::FALSE, m_view.as_ptr());
-                    }
-
-                    //fix: compute/indirect draw; v_counter read *may* be stale
-                    // SAFETY: safe access to the gcounter ssbo is only guaranteed
-                    // if the geometry composition pass has finished writing to it.
-                    // This is the caller's responsability.
-                    let gcounter = unsafe { gbank.gcounter_buffer().view() };
-                    let [v_counter, _t_counter] = gcounter[0];
-
-                    gbank.bind_data_buffers();
-
-                    unsafe {
-                        janus::gl::DrawArrays(janus::gl::TRIANGLES, 0, v_counter as i32);
-                    }
-                },
-            ),
             shader,
+            cpy_shader,
+            opts_buffer: SingleBuffer::new(1, InitStrategy::FillWith(|| DEFAULT_DRAW_CMD)),
+            inner: DrawPass::new(handle_view, [], [raster_out, depth_out], |_, ctx| {
+                let GeomRasterizeCtx {
+                    gbank,
+                    shader,
+                    cpy_shader,
+                    opts_buffer,
+                    m_proj,
+                    m_view,
+                } = ctx;
+
+                gbank.bind_data_buffers();
+                gbank.bind_gcounter_buffer();
+
+                opts_buffer.bind_shader_storage(G_RASTER_SSBO_BIND_CPYOPTS, 0);
+                cpy_shader.bind();
+                cpy_shader.dispatch([1, 1, 1]);
+
+                shader.bind();
+                // ethel shader uniform interface seems to not
+                // work (likely due to array/mat4 mismatch?)
+                // shader.uniform_proj_mat_mat4v([*m_proj]);
+                // shader.uniform_view_mat_mat4v([*m_view]);
+                let l0 = shader.find_uniform_location("proj_mat");
+                let l1 = shader.find_uniform_location("view_mat");
+                unsafe {
+                    janus::gl::UniformMatrix4fv(l0.get(), 1, janus::gl::FALSE, m_proj.as_ptr());
+                    janus::gl::UniformMatrix4fv(l1.get(), 1, janus::gl::FALSE, m_view.as_ptr());
+                }
+
+                janus::gl::barrier_shader_storage();
+
+                let cmd_view = unsafe {
+                    opts_buffer.set_length(1);
+                    opts_buffer.view()
+                };
+                GpuCommandDispatch::from_view(cmd_view).dispatch();
+            }),
         }
     }
 
@@ -116,6 +136,8 @@ impl GeomRasterizePass {
     ) {
         let ctx = GeomRasterizeCtx {
             shader: &self.shader,
+            cpy_shader: &self.cpy_shader,
+            opts_buffer: &self.opts_buffer,
             gbank,
             #[cfg(feature = "glam")]
             m_proj: m_proj.to_cols_array(),
@@ -135,6 +157,8 @@ impl GeomRasterizePass {
 pub struct GeomRasterizeCtx<'ctx> {
     pub gbank: &'ctx GeometryBank,
     pub shader: &'ctx ShaderGeomRasterize,
+    pub cpy_shader: &'ctx ComputeShaderGeomRasterCpyOpts,
+    pub opts_buffer: &'ctx SingleBuffer<DrawArraysIndirectCommand>,
     pub m_proj: [f32; 16],
     pub m_view: [f32; 16],
 }
@@ -188,13 +212,13 @@ ethel::shader_glsl! {
             }
         ];
 
-        // assumes rg32ui output
+        // assumes rg32ui color output
         unit ShaderKind::Pixel => [
             attribs {
                 ethel::shader_glsl_attribs! {
                     input rd_TriangleID : uint as flat;
                     input rd_GeoID      : uint as flat;
-                    output outColor     : uvec4;
+                    output outColor     : uvec2;
                 }
             };
 
@@ -204,9 +228,69 @@ ethel::shader_glsl! {
                 uint R = rd_TriangleID;
                 uint G = rd_GeoID;
 
-                outColor = uvec4(R, G, 0, 0);
+                outColor = uvec2(R, G);
                 ";
             }
         ];
+    }
+}
+
+macro_rules! ssbo_binding {
+    (rendrs_GeomRasterCpyOpts_Outbuf) => {
+        10
+    };
+}
+
+pub const G_RASTER_SSBO_BIND_CPYOPTS: u32 = ssbo_binding!(rendrs_GeomRasterCpyOpts_Outbuf);
+
+ethel::shader_glsl_compute! {
+    struct GeomRasterCpyOpts > [460] {
+        workgroup [1, 1, 1];
+
+        type {
+            TYPE_DRAWCMD_INDIRECT_ARRAYS
+            TYPE_DRAWCMD_INDIRECT_ELEMENTS
+        };
+        ssbo {
+            super::shader::SSBO_GBANK_GCOUNTER
+
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_GeomRasterCpyOpts_Outbuf => {
+                    DrawArraysIndirectCommand : out_cmd;
+                }
+            }
+        };
+
+        src() {
+            "
+            uint gc_vert = atomicExchange(rendrs_gbank_gcounter_vertex, 0u);
+            uint gc_tris = atomicExchange(rendrs_gbank_gcounter_triangle, 0u);
+            out_cmd.count = gc_vert;
+            ";
+        }
+    }
+}
+
+pub const TYPE_DRAWCMD_INDIRECT_ARRAYS: GlslStruct =
+    DrawArraysIndirectCommandGlslStruct::as_definition();
+pub const TYPE_DRAWCMD_INDIRECT_ELEMENTS: GlslStruct =
+    DrawElementsIndirectCommandGlslStruct::as_definition();
+
+ethel::shader_glsl_struct! {
+    struct DrawArraysIndirectCommand {
+        count: u32 => uint,
+        instance_count: u32 => uint,
+        first_vertex: u32 => uint,
+        base_instance: u32 => uint
+    }
+}
+
+ethel::shader_glsl_struct! {
+    struct DrawElementsIndirectCommand {
+        count: u32 => uint,
+        instance_count: u32 => uint,
+        first_vertex: u32 => uint,
+        base_vertex: i32 => int,
+        base_instance: u32 => uint
     }
 }

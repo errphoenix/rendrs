@@ -30,7 +30,7 @@ pub const fn rf_bspline_downsample(shader: &ComputeShaderBSplineDownscale) -> BS
         let mip_level = mip_level.get();
 
         let target = *target;
-        let input = SamplerObject::with_mip_view(target, mip_level - 1);
+        let input = SamplerObject::from_texture_with_mip_view(target, mip_level - 1);
         let output = ImageObjectTarget::with_mip_level(
             ImageObject::DirectTexture(target),
             ImageAccessKind::WriteOnly,
@@ -184,7 +184,7 @@ pub const fn rf_prefilter_cubemap(
     output: TextureView,
 ) -> PrefilterCubemapPass {
     let handle_view = shader.compute_handle().view();
-    let sampler = SamplerObject::new(source_sampler);
+    let sampler = SamplerObject::from_texture(source_sampler);
     let image = ImageObject::DirectTexture(output);
     let outputs = ImageObjectTarget::from_texture_mips::<{ FILTERING_MIP_COUNT as usize }>(
         image,
