@@ -1,6 +1,6 @@
 use ethel::{
     render::{Resolution, buffer::StorageSection},
-    shader::{ComputeShaderHandleView, ShaderHandleView, ShaderKind, ShaderProgram},
+    shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
 use janus::{
     GlProperty, GpuResource,
