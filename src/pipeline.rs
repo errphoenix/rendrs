@@ -884,6 +884,8 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
     pub fn bind_framebuffer(&self) {
         if let Some(fb) = &self.framebuffer {
             fb.bind();
+        } else {
+            crate::framebuffer::bind_default();
         }
     }
 
@@ -1127,116 +1129,5 @@ impl BlitPass {
 
     pub const fn set_source(&mut self, source: RenderTargetAccessor) -> RenderTargetAccessor {
         std::mem::replace(&mut self.source, source)
-    }
-}
-
-#[derive(Debug)]
-pub struct QuadBlitPass {
-    inner: DrawPass<EmptyPassCtx, 1, 0>,
-    shader: ShaderQuadBlit,
-}
-impl Pass<EmptyPassCtx> for QuadBlitPass {
-    fn shader(&self) -> impl ShaderProgram {
-        self.shader.handle().view()
-    }
-
-    fn revalidate(&mut self, render_pool: &RenderPool) {
-        self.inner.revalidate(render_pool);
-    }
-
-    fn execute(
-        &self,
-        frame_index: StorageSection,
-        render_pool: &RenderPool,
-        ctx: &<EmptyPassCtx as CtxType>::Ctx<'_>,
-    ) {
-        self.inner.execute(frame_index, render_pool, ctx);
-    }
-}
-impl QuadBlitPass {
-    pub fn new(src: SamplerObject) -> Self {
-        let shader = ShaderQuadBlit::new_compiled();
-        Self {
-            inner: DrawPass::new(
-                shader.handle().view(),
-                [Sampler::wrap_unit0(src)],
-                [],
-                |_, _| unsafe {
-                    janus::gl::DrawArrays(janus::gl::TRIANGLES, 0, 6);
-                },
-            ),
-            shader,
-        }
-    }
-
-    pub const fn inner(&self) -> &DrawPass<EmptyPassCtx, 1, 0> {
-        &self.inner
-    }
-
-    pub const fn inner_shader(&self) -> &ShaderQuadBlit {
-        &self.shader
-    }
-}
-
-ethel::shader_glsl! {
-    struct QuadBlit > [460] {
-        common {};
-
-        unit ShaderKind::Vertex => [
-            attribs {
-                ethel::shader_glsl_attribs! {
-                    output uv : vec2;
-                }
-            };
-
-            src() {
-                "
-                vec2 vertex;
-                switch(gl_VertexID) {
-                    case 0:
-                        vertex = vec2(-1.0, -1.0);
-                        break;
-                    case 1:
-                        vertex = vec2(-1.0,  1.0);
-                        break;
-                    case 2:
-                        vertex = vec2( 1.0,  1.0);
-                        break;
-                    case 3:
-                        vertex = vec2( 1.0,  1.0);
-                        break;
-                    case 4:
-                        vertex = vec2( 1.0, -1.0);
-                        break;
-                    case 5:
-                        vertex = vec2(-1.0, -1.0);
-                        break;
-                }
-
-                uv = vertex;
-
-                gl_Position = vec4(vertex.x, vertex.y, 0.0, 1.0);
-                ";
-            }
-        ];
-
-        unit ShaderKind::Pixel => [
-            attribs {
-                ethel::shader_glsl_attribs! {
-                    input  uv       : vec2;
-                    output outColor : vec4;
-                }
-            };
-
-            sampler {
-                on 0 => blit_src : sampler2D;
-            };
-
-            src() {
-                "
-                outColor = texture(blit_src, uv);
-                ";
-            }
-        ];
     }
 }
