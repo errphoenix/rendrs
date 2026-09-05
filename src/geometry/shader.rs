@@ -164,21 +164,49 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 ///
 /// Geometry submission functions can submit arbitrary vertices and triangles
 /// data for rendering:
-/// * `uint Vertex(vec3 position, vec2 normal_oct, vec2 tangent_oct, vec2 uv)`:
-///     Submits a vertex at `position` with the specified `normal` and
-///     `tangent` vectors. The last 2 are octahedron-encoded.
-///     Returns the index of the submitted vertex.
-/// * `uint Vertex(vec3 position, vec3 normal, vec3 tangent, vec2 uv)`:
-///     Submits a vertex at `position` with the specified `normal` and
-///     `tangent` vectors. These are *not* octahedron-encoded, octahedron
-///     encoding is performed inside the function with `rendrs'` packing
-///     functions.
-///     Returns the index of the submitted vertex.
-/// * `uint Triangle(uint v0, uint v1, uint v2, uint geom_id)`:
-///    Submits a triangle formed by the given `v0, v1, v2` vertex indices as
-///    returned by `Vertex`.
-///    `geom_id` is the geometry ID as provided by Rendrs.
-///    Returns the index of the submitted triangle.
+/// * **Allocation**
+///   * `uint Alloc[Vertex|Triangle](optional uint count)`:
+///     allocates one or a sequence of length `count` vertices/triangles to the
+///     global counter and returns the base handle.
+///     If `count` is not provided or is `1`, the base handle is the index of the
+///     triangle/vertex itself. If `count > 1` then a span from `(base,base+count)`
+///     will be allocated.
+/// * **Fill**
+///   * `void VertexData(uint handle, vec3 position, vec2|vec3 normal,
+///      vec2|vec3 tangent, vec2 uv)`:
+///      Fills vertex data for the vertex corresponding to `handle` with the
+///      given data. `normal` and `tangent` can be either `vec2`s if
+///      octahedron encoded or `vec3`s if not (if they are given as `vec3`s,
+///      they will be encoded anyways internally).
+///   * `void VertexData(uint base, vec3 positions[], vec2|vec3 normals[]
+///      vec2|vec3 tangents[], vec2 uvs[], uint count)`:
+///      See above. Bulk-fills contiguous vertex data with the given parallel
+///      data arrays.
+///      `count` must be the amount of vertices to fill starting from `base`.
+///   * `void TriangleData(uint handle, uint indices[3], uint geom_id)`:
+///      Fills the triangle data for the triangle corresponding to `handle`
+///      with the given data.
+///   * `void TriangleData(uint base, uint indices[][3], uint geom_id,
+///      uint count)`:
+///      See above. Bulk-fills contiguous triangle data with the given parallel
+///      data arrays.
+///      `count` must be the amount of triangles to fill starting from `base`.
+///  * **One-off alloc + fill**
+///    * `uint Alloc[Vertex|Triangle]Data(DATA data)`:
+///      allocate and feed a single vertex/triangle with the given `data`,
+///      returning the index of the allocated vertex/triangle.
+///      The `DATA data` parameter(s) must correspond to the parameter list
+///      as seen in the entry for `VertexData` or `TriangleData` methods
+///      (non-bulk variants).
+///  * **Getters**
+///   * `RenderVertex GetVertex(uint handle)`:
+///     returns the vertex data corresponding to the given `handle`.
+///   * `uint[3] GetTriangle(uint handle)`:
+///     returns the triangle indexing data corresponding to the given
+///     `handle`.
+///   * `TriangleAttribs GetTriangleAttribs(uint handle)`:
+///     returns the triangle attribute data corresponding to the given
+///     `handle`.
 ///
 /// [`rendrs_packOctahedron`]: crate::pack::PACK_OCTAHEDRON_ENCODE
 /// [`rendrs_unpackOctahedron`]: crate::pack::PACK_OCTAHEDRON_DECODE
@@ -297,20 +325,14 @@ macro_rules! geometry_submission_job {
                             return atomicAdd(rendrs_gbank_gcounter_triangle, 1);
                         }
 
-                        // alloc N, output to array
-                        void AllocVertex(uint count, out uint indices[]) {
-                            if (count == 0) return;
-                            uint vertex_base = atomicAdd(rendrs_gbank_gcounter_vertex, count);
-                            for (uint i = 0; i < count; ++i) {
-                                indices[i] = vertex_base + i;
-                            }
+                        // alloc N, return base
+                        uint AllocVertex(uint count) {
+                            if (count == 0) return 0;
+                            return atomicAdd(rendrs_gbank_gcounter_vertex, count);
                         }
-                        void AllocTriangle(uint count, out uint indices[]) {
-                            if (count == 0) return;
-                            uint triangle_base = atomicAdd(rendrs_gbank_gcounter_triangle, count);
-                            for (uint i = 0; i < count; ++i) {
-                                indices[i] = triangle_base + i;
-                            }
+                        uint AllocTriangle(uint count) {
+                            if (count == 0) return 0;
+                            return atomicAdd(rendrs_gbank_gcounter_triangle, count);
                         }
                         "
                     });
@@ -338,9 +360,9 @@ macro_rules! geometry_submission_job {
                         }
 
                         // feed N
-                        void VertexData(uint index[], uint count, vec3 p[], vec2 n_oct[], vec2 t_oct[], vec2 uv[]) {
+                        void VertexData(uint base, vec3 p[], vec2 n_oct[], vec2 t_oct[], vec2 uv[], uint count) {
                             for (uint i = 0; i < count; ++i) {
-                                rendrs_gbank_vertex[index[i]] = RenderVertex(
+                                rendrs_gbank_vertex[base + i] = RenderVertex(
                                     p[i].x, p[i].y, p[i].z,
                                     n_oct[i].x, n_oct[i].y,
                                     t_oct[i].x, t_oct[i].y,
@@ -348,16 +370,16 @@ macro_rules! geometry_submission_job {
                                 );
                             }
                         }
-                        void VertexData(uint index[], uint count, vec3 p[], vec3 n[], vec3 t[], vec2 uv[]) {
+                        void VertexData(uint base, vec3 p[], vec3 n[], vec3 t[], vec2 uv[], uint count) {
                             for (uint i = 0; i < count; ++i) {
                                 vec2 n_oct = rendrs_packOctahedron(n[i]);
                                 vec2 t_oct = rendrs_packOctahedron(t[i]);
-                                VertexData(index[i], p[i], n_oct, t_oct, uv[i]);
+                                VertexData(base + i, p[i], n_oct, t_oct, uv[i]);
                             }
                         }
-                        void TriangleData(uint index[], uint count, uint data[][3], uint geom_id[]) {
+                        void TriangleData(uint base, uint data[][3], uint geom_id[], uint count) {
                             for (uint i = 0; i < count; ++i) {
-                                TriangleData(index[i], data[i], geom_id[i]);
+                                TriangleData(base + i, data[i], geom_id[i]);
                             }
                         }
                         "
