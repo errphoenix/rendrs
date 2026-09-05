@@ -284,7 +284,7 @@ macro_rules! geometry_submission_job {
                             return idx8_geoid24 & _iDOMAIN_GEOID_BITMASK;
                         }"
                     });
-                    // emit triangle function
+                    // emit triangle function (& getters)
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         uint Triangle(uint v0, uint v1, uint v2, uint geom_id) {
@@ -298,9 +298,17 @@ macro_rules! geometry_submission_job {
                             rendrs_gbank_triangle_attribs[triangle_index] = attribs;
 
                             return triangle_index;
-                        }"
+                        }
+
+                        uint[3] GetTriangle(uint index) {
+                            return rendrs_gbank_triangle[index];
+                        }
+                        TriangleAttribs GetTriangleAttribs(uint index) {
+                            return rendrs_gbank_triangle_attribs[index];
+                        }
+                        "
                     });
-                    // emit vertex functions
+                    // emit vertex functions (& getter)
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
@@ -320,7 +328,12 @@ macro_rules! geometry_submission_job {
                             vec2 n_oct = rendrs_packOctahedron(n);
                             vec2 t_oct = rendrs_packOctahedron(t);
                             return Vertex(p, n_oct, t_oct, uv);
-                        }"
+                        }
+
+                        RenderVertex GetVertex(uint index) {
+                            return rendrs_gbank_vertex[index];
+                        }
+                        "
                     });
 
                     $($($e_lib;)+)?
@@ -337,7 +350,7 @@ macro_rules! geometry_submission_job {
                     });
                 };
                 $(share {
-                    $($share_t:ident $share_n:ident $([$arr_c:expr])*;)*
+                    $($share_t $share_n $([$arr_c])*;)*
                 };)?
 
                 src() {
