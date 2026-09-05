@@ -284,54 +284,117 @@ macro_rules! geometry_submission_job {
                             return idx8_geoid24 & _iDOMAIN_GEOID_BITMASK;
                         }"
                     });
-                    // emit triangle function (& getters)
+
+                    // vertex/triangle allocation functions
+                    // these functions are akin to OpenGL's Create*/Gen* functions
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
-                        uint Triangle(uint v0, uint v1, uint v2, uint geom_id) {
-                            uint triangle_index = atomicAdd(rendrs_gbank_gcounter_triangle, 1);
-
-                            rendrs_gbank_triangle[triangle_index][0] = v0;
-                            rendrs_gbank_triangle[triangle_index][1] = v1;
-                            rendrs_gbank_triangle[triangle_index][2] = v2;
-
-                            TriangleAttribs attribs = TriangleAttribs(geom_id);
-                            rendrs_gbank_triangle_attribs[triangle_index] = attribs;
-
-                            return triangle_index;
+                        // alloc 1, return
+                        uint AllocVertex() {
+                            return atomicAdd(rendrs_gbank_gcounter_vertex, 1);
+                        }
+                        uint AllocTriangle() {
+                            return atomicAdd(rendrs_gbank_gcounter_triangle, 1);
                         }
 
+                        // alloc N, output to array
+                        void AllocVertex(uint count, out uint indices[]) {
+                            if (count == 0) return;
+                            uint vertex_base = atomicAdd(rendrs_gbank_gcounter_vertex, count);
+                            for (uint i = 0; i < count; ++i) {
+                                indices[i] = vertex_base + i;
+                            }
+                        }
+                        void AllocTriangle(uint count, out uint indices[]) {
+                            if (count == 0) return;
+                            uint triangle_base = atomicAdd(rendrs_gbank_gcounter_triangle, count);
+                            for (uint i = 0; i < count; ++i) {
+                                indices[i] = triangle_base + i;
+                            }
+                        }
+                        "
+                    });
+                    // vertex/triangle data functions
+                    ethel::shader::GlslLib::new(indoc::indoc! {
+                        "
+                        // feed 1
+                        void VertexData(uint index, vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
+                            rendrs_gbank_vertex[index] = RenderVertex(
+                                p.x, p.y, p.z,
+                                n_oct.x, n_oct.y,
+                                t_oct.x, t_oct.y,
+                                uv.x, uv.y
+                            );
+                        }
+                        void VertexData(uint index, vec3 p, vec3 n, vec3 t, vec2 uv) {
+                            vec2 n_oct = rendrs_packOctahedron(n);
+                            vec2 t_oct = rendrs_packOctahedron(t);
+                            VertexData(index, p, n_oct, t_oct, uv);
+                        }
+                        void TriangleData(uint index, uint data[3], uint geom_id) {
+                            rendrs_gbank_triangle[index] = data;
+                            TriangleAttribs attribs = TriangleAttribs(geom_id);
+                            rendrs_gbank_triangle_attribs[index] = attribs;
+                        }
+
+                        // feed N
+                        void VertexData(uint index[], uint count, vec3 p[], vec2 n_oct[], vec2 t_oct[], vec2 uv[]) {
+                            for (uint i = 0; i < count; ++i) {
+                                rendrs_gbank_vertex[index[i]] = RenderVertex(
+                                    p[i].x, p[i].y, p[i].z,
+                                    n_oct[i].x, n_oct[i].y,
+                                    t_oct[i].x, t_oct[i].y,
+                                    uv[i].x, uv[i].y
+                                );
+                            }
+                        }
+                        void VertexData(uint index[], uint count, vec3 p[], vec3 n[], vec3 t[], vec2 uv[]) {
+                            for (uint i = 0; i < count; ++i) {
+                                vec2 n_oct = rendrs_packOctahedron(n[i]);
+                                vec2 t_oct = rendrs_packOctahedron(t[i]);
+                                VertexData(index[i], p[i], n_oct, t_oct, uv[i]);
+                            }
+                        }
+                        void TriangleData(uint index[], uint count, uint data[][3], uint geom_id[]) {
+                            for (uint i = 0; i < count; ++i) {
+                                TriangleData(index[i], data[i], geom_id[i]);
+                            }
+                        }
+                        "
+                    });
+                    // vertex/triangle getters
+                    ethel::shader::GlslLib::new(indoc::indoc! {
+                        "
                         uint[3] GetTriangle(uint index) {
                             return rendrs_gbank_triangle[index];
                         }
                         TriangleAttribs GetTriangleAttribs(uint index) {
                             return rendrs_gbank_triangle_attribs[index];
                         }
-                        "
-                    });
-                    // emit vertex functions (& getter)
-                    ethel::shader::GlslLib::new(indoc::indoc! {
-                        "
-                        uint Vertex(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
-                            uint vertex_index = atomicAdd(rendrs_gbank_gcounter_vertex, 1);
-
-                            rendrs_gbank_vertex[vertex_index] = RenderVertex(
-                                p.x, p.y, p.z,
-                                n_oct.x, n_oct.y,
-                                t_oct.x, t_oct.y,
-                                uv.x, uv.y
-                            );
-
-                            return vertex_index;
-                        }
-
-                        uint Vertex(vec3 p, vec3 n, vec3 t, vec2 uv) {
-                            vec2 n_oct = rendrs_packOctahedron(n);
-                            vec2 t_oct = rendrs_packOctahedron(t);
-                            return Vertex(p, n_oct, t_oct, uv);
-                        }
 
                         RenderVertex GetVertex(uint index) {
                             return rendrs_gbank_vertex[index];
+                        }
+                        "
+                    });
+                    // all-in-one alloc+data functions for convenience/testing
+                    ethel::shader::GlslLib::new(indoc::indoc! {
+                        "
+                        uint AllocTriangleData(uint indices[3], uint geom_id) {
+                            uint triangle_index = AllocTriangle();
+                            TriangleData(triangle_index, indices, geom_id);
+                            return triangle_index;
+                        }
+
+                        uint AllocVertexData(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
+                            uint vertex_index = AllocVertex();
+                            VertexData(vertex_index, p, n_oct, t_oct, uv);
+                            return vertex_index;
+                        }
+                        uint AllocVertexData(vec3 p, vec3 n, vec3 t, vec2 uv) {
+                            vec2 n_oct = rendrs_packOctahedron(n);
+                            vec2 t_oct = rendrs_packOctahedron(t);
+                            return AllocVertexData(p, n_oct, t_oct, uv);
                         }
                         "
                     });
