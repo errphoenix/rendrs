@@ -1,6 +1,7 @@
 use ethel::render::buffer::SingleBuffer;
 
 pub use dispatch::GeomPass;
+use janus::GpuResource;
 pub use rasterize::{
     GeomRasterizePass, barrier_geom_compose, barrier_geom_rasterize, geom_rasterize_target,
 };
@@ -130,6 +131,16 @@ impl GeometryBank {
 
     pub const fn gcounter_buffer(&self) -> &GCounterBuffer {
         &self.gcounter
+    }
+
+    pub fn index_buffer(&self) -> u32 {
+        self.triangle.resource_id()
+    }
+
+    pub fn bind_index_buffer(&self) {
+        unsafe {
+            janus::gl::BindBuffer(janus::gl::ELEMENT_ARRAY_BUFFER, self.triangle.resource_id());
+        }
     }
 
     pub fn bind_data_buffers_to(&self, v_index: u32, tri_index: u32, trimeta_index: u32) {

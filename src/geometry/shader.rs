@@ -98,7 +98,9 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 /// are reserved for geometry data.
 ///
 /// (Also ensure no types are named exactly 'Vertex' or 'Triangle', as these
-/// named are already used for functions)
+/// names are already used for functions)
+///
+/// The triangle indices data can be bound as an EBO for indexed drawing.
 ///
 /// ## Context
 ///
@@ -327,19 +329,18 @@ macro_rules! geometry_submission_job {
 
                         // alloc N, return base
                         uint AllocVertex(uint count) {
-                            if (count == 0) return 0;
+                            //if (count == 0) return 0;
                             return atomicAdd(rendrs_gbank_gcounter_vertex, count);
                         }
                         uint AllocTriangle(uint count) {
-                            if (count == 0) return 0;
+                            //if (count == 0) return 0;
                             return atomicAdd(rendrs_gbank_gcounter_triangle, count);
                         }
                         "
                     });
-                    // vertex/triangle data functions
+                    // vertex/triangle data feeding functions
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
-                        // feed 1
                         void VertexData(uint index, vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
                             rendrs_gbank_vertex[index] = RenderVertex(
                                 p.x, p.y, p.z,
@@ -357,30 +358,6 @@ macro_rules! geometry_submission_job {
                             rendrs_gbank_triangle[index] = data;
                             TriangleAttribs attribs = TriangleAttribs(geom_id);
                             rendrs_gbank_triangle_attribs[index] = attribs;
-                        }
-
-                        // feed N
-                        void VertexData(uint base, vec3 p[], vec2 n_oct[], vec2 t_oct[], vec2 uv[], uint count) {
-                            for (uint i = 0; i < count; ++i) {
-                                rendrs_gbank_vertex[base + i] = RenderVertex(
-                                    p[i].x, p[i].y, p[i].z,
-                                    n_oct[i].x, n_oct[i].y,
-                                    t_oct[i].x, t_oct[i].y,
-                                    uv[i].x, uv[i].y
-                                );
-                            }
-                        }
-                        void VertexData(uint base, vec3 p[], vec3 n[], vec3 t[], vec2 uv[], uint count) {
-                            for (uint i = 0; i < count; ++i) {
-                                vec2 n_oct = rendrs_packOctahedron(n[i]);
-                                vec2 t_oct = rendrs_packOctahedron(t[i]);
-                                VertexData(base + i, p[i], n_oct, t_oct, uv[i]);
-                            }
-                        }
-                        void TriangleData(uint base, uint data[][3], uint geom_id[], uint count) {
-                            for (uint i = 0; i < count; ++i) {
-                                TriangleData(base + i, data[i], geom_id[i]);
-                            }
                         }
                         "
                     });
@@ -441,31 +418,28 @@ macro_rules! geometry_submission_job {
                 src() {
                     "
                     DomainData _domain = rendrs_domains[gl_WorkGroupID.x];
-
                     uint _d_threads = _domain.thread_count;
-                    if (gl_LocalInvocationID.x >= _d_threads) {
-                        return;
+                    if (gl_LocalInvocationID.x < _d_threads) {
+                        uint _d_packed = _domain.idx8_geoid24;
+                        uint _d_index  = _iDomain_unpackIndex(_d_packed);
+                        uint _d_geoid  = _iDomain_unpackGeoID(_d_packed);
+
+                        const uint rendrs_GeometryID  = _d_geoid;
+                        const uint rendrs_DomainIndex = _d_index;
+                        const uint rendrs_WorkGroupID = gl_WorkGroupID.x;
+                        const uint rendrs_ThreadID = 64 * _d_index + gl_LocalInvocationID.x;
+                        const uint rendrs_DomainThreadID = gl_LocalInvocationID.x;
+                        const uint rendrs_GlobalThreadID = gl_GlobalInvocationID.x;
+
+                        _submitGeometry(
+                            rendrs_GeometryID,
+                            rendrs_DomainIndex,
+                            rendrs_WorkGroupID,
+                            rendrs_ThreadID,
+                            rendrs_DomainThreadID,
+                            rendrs_GlobalThreadID
+                        );
                     }
-
-                    uint _d_packed = _domain.idx8_geoid24;
-                    uint _d_index  = _iDomain_unpackIndex(_d_packed);
-                    uint _d_geoid  = _iDomain_unpackGeoID(_d_packed);
-
-                    const uint rendrs_GeometryID  = _d_geoid;
-                    const uint rendrs_DomainIndex = _d_index;
-                    const uint rendrs_WorkGroupID = gl_WorkGroupID.x;
-                    const uint rendrs_ThreadID = 64 * _d_index + gl_LocalInvocationID.x;
-                    const uint rendrs_DomainThreadID = gl_LocalInvocationID.x;
-                    const uint rendrs_GlobalThreadID = gl_GlobalInvocationID.x;
-
-                    _submitGeometry(
-                        rendrs_GeometryID,
-                        rendrs_DomainIndex,
-                        rendrs_WorkGroupID,
-                        rendrs_ThreadID,
-                        rendrs_DomainThreadID,
-                        rendrs_GlobalThreadID
-                    );
                     ";
                 }
             }

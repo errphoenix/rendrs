@@ -2,11 +2,14 @@ use ethel::{
     render::{
         Resolution,
         buffer::{InitStrategy, SingleBuffer, StorageSection},
-        command::{DrawArraysIndirectCommand, GpuCommandDispatch},
+        command::DrawElementsIndirectCommand,
     },
     shader::{GlslStruct, ShaderKind, ShaderProgram},
 };
-use janus::texture::{ImageFormat, ImageType, MipLevels, TextureFiltering};
+use janus::{
+    GpuResource,
+    texture::{ImageFormat, ImageType, MipLevels, TextureFiltering},
+};
 
 use crate::{
     DrawPass,
@@ -18,7 +21,9 @@ use crate::{
 pub fn barrier_geom_compose() {
     unsafe {
         janus::gl::MemoryBarrier(
-            janus::gl::SHADER_STORAGE_BARRIER_BIT | janus::gl::ATOMIC_COUNTER_BARRIER_BIT,
+            janus::gl::SHADER_STORAGE_BARRIER_BIT
+                | janus::gl::ATOMIC_COUNTER_BARRIER_BIT
+                | janus::gl::ELEMENT_ARRAY_BARRIER_BIT,
         );
     }
 }
@@ -52,7 +57,7 @@ pub struct GeomRasterizePass {
     inner: DrawPass<GeomRasterizeCtxWrapper, 0, 2>,
     shader: ShaderGeomRasterize,
     cpy_shader: ComputeShaderGeomRasterCpyOpts,
-    opts_buffer: SingleBuffer<DrawArraysIndirectCommand>, //more opts?
+    opts_buffer: SingleBuffer<DrawElementsIndirectCommand>, //more opts?
 }
 impl GeomRasterizePass {
     /// Expects an RG32UI `raster_out` color attachment, as returned by
@@ -61,10 +66,11 @@ impl GeomRasterizePass {
         let shader = ShaderGeomRasterize::new_compiled();
         let cpy_shader = ComputeShaderGeomRasterCpyOpts::new_compiled();
 
-        const DEFAULT_DRAW_CMD: DrawArraysIndirectCommand = DrawArraysIndirectCommand {
+        const DEFAULT_DRAW_CMD: DrawElementsIndirectCommand = DrawElementsIndirectCommand {
             count: 0,
             instance_count: 1,
             first_vertex: 0,
+            base_vertex: 0,
             base_instance: 0,
         };
         let handle_view = shader.handle().view();
@@ -103,12 +109,23 @@ impl GeomRasterizePass {
                 }
 
                 janus::gl::barrier_shader_storage();
+                janus::gl::barrier_commands();
 
-                let cmd_view = unsafe {
-                    opts_buffer.set_length(1);
-                    opts_buffer.view()
-                };
-                GpuCommandDispatch::from_view(cmd_view).dispatch();
+                gbank.bind_index_buffer();
+
+                unsafe {
+                    janus::gl::BindBuffer(
+                        janus::gl::DRAW_INDIRECT_BUFFER,
+                        opts_buffer.resource_id(),
+                    );
+                    janus::gl::MultiDrawElementsIndirect(
+                        janus::gl::TRIANGLES,
+                        janus::gl::UNSIGNED_INT,
+                        std::ptr::null(),
+                        1,
+                        0,
+                    );
+                }
             }),
         }
     }
@@ -125,6 +142,8 @@ impl GeomRasterizePass {
         &self.shader
     }
 
+    /// Expects a VAO bound with a valid EBO for the rasterizing geometry to
+    /// be bound.
     pub fn execute(
         &self,
         render_pool: &RenderPool,
@@ -158,7 +177,7 @@ pub struct GeomRasterizeCtx<'ctx> {
     pub gbank: &'ctx GeometryBank,
     pub shader: &'ctx ShaderGeomRasterize,
     pub cpy_shader: &'ctx ComputeShaderGeomRasterCpyOpts,
-    pub opts_buffer: &'ctx SingleBuffer<DrawArraysIndirectCommand>,
+    pub opts_buffer: &'ctx SingleBuffer<DrawElementsIndirectCommand>,
     pub m_proj: [f32; 16],
     pub m_view: [f32; 16],
 }
@@ -169,43 +188,23 @@ ethel::shader_glsl! {
         common {};
 
         unit ShaderKind::Vertex => [
-            attribs {
-                ethel::shader_glsl_attribs! {
-                    output rd_TriangleID : uint as flat;
-                    output rd_GeoID      : uint as flat;
-                }
-            };
-
             uniform {
                 length 1, proj_mat : mat4 => [f32; 16];
                 length 1, view_mat : mat4 => [f32; 16];
             };
             type {
                 crate::geometry::shader::TYPE_RENDERVERTEX
-                crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
             };
             ssbo {
                 crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-                crate::geometry::shader::SSBO_GBANK_TRIANGLE
-                crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
             };
 
             src() {
                 "
-                uint t_i = gl_VertexID / 3;
-                uint v_i = gl_VertexID % 3;
-
-                uint tri[3] = rendrs_gbank_triangle[t_i];
-                TriangleAttribs tri_attribs = rendrs_gbank_triangle_attribs[t_i];
-
-                uint vert_i = tri[v_i];
-                RenderVertex vertex = rendrs_gbank_vertex[vert_i];
+                RenderVertex vertex = rendrs_gbank_vertex[gl_VertexID];
 
                 vec3 P_model = vec3(vertex.pos_x, vertex.pos_y, vertex.pos_z);
                 vec4 P_world = proj_mat * view_mat * vec4(P_model, 1.0);
-
-                rd_TriangleID = t_i;
-                rd_GeoID = tri_attribs.geometry_id;
 
                 gl_Position = P_world;
                 ";
@@ -216,17 +215,23 @@ ethel::shader_glsl! {
         unit ShaderKind::Pixel => [
             attribs {
                 ethel::shader_glsl_attribs! {
-                    input rd_TriangleID : uint as flat;
-                    input rd_GeoID      : uint as flat;
-                    output outColor     : uvec2;
+                    output outColor : uvec2;
                 }
+            };
+            type {
+                crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+            };
+            ssbo {
+                crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
             };
 
             src() {
                 "
+                TriangleAttribs tri_attribs = rendrs_gbank_triangle_attribs[gl_PrimitiveID];
+
                 //todo: more metadata in g channel (tri-atts), bit-packing
-                uint R = rd_TriangleID;
-                uint G = rd_GeoID;
+                uint R = gl_PrimitiveID;
+                uint G = tri_attribs.geometry_id;
 
                 outColor = uvec2(R, G);
                 ";
@@ -256,7 +261,7 @@ ethel::shader_glsl_compute! {
 
             ethel::shader_glsl_ssbo! {
                 buf rendrs_GeomRasterCpyOpts_Outbuf => {
-                    DrawArraysIndirectCommand : out_cmd;
+                    DrawElementsIndirectCommand : out_cmd;
                 }
             }
         };
@@ -265,7 +270,7 @@ ethel::shader_glsl_compute! {
             "
             uint gc_vert = atomicExchange(rendrs_gbank_gcounter_vertex, 0u);
             uint gc_tris = atomicExchange(rendrs_gbank_gcounter_triangle, 0u);
-            out_cmd.count = gc_vert;
+            out_cmd.count = gc_tris * 3;
             ";
         }
     }
