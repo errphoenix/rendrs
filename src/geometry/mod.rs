@@ -82,6 +82,18 @@ pub type TriangleAttribsBuffer = SingleBuffer<TriangleAttribs>;
 /// Index 1 = triangle counter
 pub type GCounterBuffer = SingleBuffer<[u32; 2]>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GeoCounters(u32, u32);
+impl GeoCounters {
+    pub const fn vertices(self) -> u32 {
+        self.0
+    }
+
+    pub const fn triangles(self) -> u32 {
+        self.1
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct GeometryBank {
     vertex_cap: usize,
@@ -100,12 +112,6 @@ impl GeometryBank {
             triangle: SingleBuffer::zeroed(triangle_cap),
             triangle_attribs: SingleBuffer::zeroed(triangle_cap),
             gcounter: SingleBuffer::zeroed(1),
-        }
-    }
-
-    pub fn clear_gcounters(&self) {
-        unsafe {
-            self.gcounter.blit(&[[0, 0]], 0);
         }
     }
 
@@ -131,6 +137,16 @@ impl GeometryBank {
 
     pub const fn gcounter_buffer(&self) -> &GCounterBuffer {
         &self.gcounter
+    }
+
+    pub fn get_gcounters(&self) -> GeoCounters {
+        let gcounter_buf = self.gcounter.resource_id();
+        let mut dst = GeoCounters::default();
+        let dst_ptr = (&raw mut dst).cast();
+        unsafe {
+            janus::gl::GetNamedBufferSubData(gcounter_buf, 0, 8, dst_ptr);
+        }
+        dst
     }
 
     pub fn index_buffer(&self) -> u32 {

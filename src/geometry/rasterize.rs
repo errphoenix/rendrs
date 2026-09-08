@@ -97,16 +97,8 @@ impl GeomRasterizePass {
                 cpy_shader.dispatch([1, 1, 1]);
 
                 shader.bind();
-                // ethel shader uniform interface seems to not
-                // work (likely due to array/mat4 mismatch?)
-                // shader.uniform_proj_mat_mat4v([*m_proj]);
-                // shader.uniform_view_mat_mat4v([*m_view]);
-                let l0 = shader.find_uniform_location("proj_mat");
-                let l1 = shader.find_uniform_location("view_mat");
-                unsafe {
-                    janus::gl::UniformMatrix4fv(l0.get(), 1, janus::gl::FALSE, m_proj.as_ptr());
-                    janus::gl::UniformMatrix4fv(l1.get(), 1, janus::gl::FALSE, m_view.as_ptr());
-                }
+                shader.uniform_proj_mat_mat4v([*m_proj]);
+                shader.uniform_view_mat_mat4v([*m_view]);
 
                 janus::gl::barrier_shader_storage();
                 janus::gl::barrier_commands();
@@ -289,7 +281,6 @@ ethel::shader_glsl_struct! {
         base_instance: u32 => uint
     }
 }
-
 ethel::shader_glsl_struct! {
     struct DrawElementsIndirectCommand {
         count: u32 => uint,
