@@ -392,7 +392,7 @@ impl AttribInterpolationPass {
                     shader.uniform_proj_mat_mat4v([*m_proj]);
                     shader.uniform_view_mat_mat4v([*m_view]);
 
-                    [wg_x, wg_y, 0]
+                    [wg_x, wg_y, 1]
                 },
             ),
         }
@@ -495,22 +495,32 @@ ethel::shader_glsl_compute! {
             uvec2 raster_data = texelFetch(tex_raster, px, 0).rg;
 
             uint Tid = raster_data.x;
+
+            if (Tid == 0xFFFFFFFF) {
+                imageStore(ima_space, px, vec4(0.0));
+                imageStore(ima_grads, px, vec4(0.0));
+                return;
+            }
+
             uint Gid = raster_data.y;
 
             uint b_tri[3] = rendrs_gbank_triangle[Tid];
+            //todo: split vertex to SoA
             RenderVertex w_v0 = rendrs_gbank_vertex[b_tri[0]];
             RenderVertex w_v1 = rendrs_gbank_vertex[b_tri[1]];
             RenderVertex w_v2 = rendrs_gbank_vertex[b_tri[2]];
+            vec3 b_p0  = vec3(w_v0.pos.x, w_v0.pos.y, w_v0.pos.z);
+            vec3 b_p1  = vec3(w_v1.pos.x, w_v1.pos.y, w_v1.pos.z);
+            vec3 b_p2  = vec3(w_v2.pos.x, w_v2.pos.y, w_v2.pos.z);
             vec2 b_uv0 = vec2(w_v0.uv_x, w_v0.uv_y);
             vec2 b_uv1 = vec2(w_v1.uv_x, w_v1.uv_y);
             vec2 b_uv2 = vec2(w_v2.uv_x, w_v2.uv_y);
 
-            uvec2 resolution = uvec2(textureSize(tex_raster));
             mat4 MVP = proj_mat * view_mat;
 
-            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, w_v0);
-            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, w_v1);
-            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, w_v2);
+            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p0);
+            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p1);
+            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p2);
 
             vec2 px_c = vec2(px) + 0.5;
             float inv_det = 1.0 / ((s_v1.x - s_v0.x) * (s_v2.y - s_v0.y) - (s_v2.x - s_v0.x) * (s_v1.y - s_v0.y));
@@ -518,14 +528,19 @@ ethel::shader_glsl_compute! {
             float B_w = ((s_v1.x - s_v0.x) * (px_c.y - s_v0.y) - (s_v1.y - s_v0.y) * (px_c.x - s_v0.x)) * inv_det;
             float B_u = 1.0 - B_v - B_w;
 
+            //todo: perspective correction
+            // wp_i = mvp * p_i
+            // y_i  = B_i / wp_i_w
+            // Bc_i = y_i / (y_0 + y_1 + y_2)
+
             vec2 b_n0e = vec2(w_v0.norm_oct_x, w_v0.norm_oct_y);
             vec3 b_n0  = rendrs_unpackOctahedron(b_n0e);
             vec2 b_n1e = vec2(w_v1.norm_oct_x, w_v1.norm_oct_y);
             vec3 b_n1  = rendrs_unpackOctahedron(b_n1e);
             vec2 b_n2e = vec2(w_v2.norm_oct_x, w_v2.norm_oct_y);
             vec3 b_n2  = rendrs_unpackOctahedron(b_n2e);
-            vec3 N  = b_n0 * B_u + b_n1 * B_v + b_n2 * B_w;
-            vec2 Ne = rendrs_packOctahedron(N);
+            vec3 N  = normalize(b_n0 * B_u + b_n1 * B_v + b_n2 * B_w);
+            vec2 Ne = rendrs_packOctahedron(N) * 0.5 + 0.5; //unorm16
             imageStore(ima_space, px, vec4(Ne.x, Ne.y, B_u, B_v));
 
             vec2 dUv1 = b_uv1 - b_uv0;
@@ -541,20 +556,49 @@ ethel::shader_glsl_compute! {
 /// Helper function to extract barycentric-weights from the `frame/space`
 /// image target produced by the deferred attribute interpolation pass.
 ///
-/// Creates the `rendrs_GetBWeights` function, which takes the `vec4` color
-/// queried from the relevant image target.
+/// Creates the `rendrs_FrameSpace_GetBWeights` function, which takes the
+/// `vec4` sample fetched from the relevant image target, which is the
+/// 'framespace'.
 ///
-/// The function will retrieve the last `BA` components of the sample,
-/// which correspond to `u` and `v` barycentric weightrs, in addition to
+/// The function will retrieve the `BA` components of the sample,
+/// which correspond to `u` and `v` barycentric weights, in addition to
 /// reconstructing the `w` weight via the formula `w = 1 - u - v` and returns
 /// the result as a `vec3` in the standard order `uvw`.
-pub const LIB_UTIL_GET_BWEIGHTS: GlslLib = ethel::shader_glsl_lib! {
-    vec3 rendrs_GetBWeights[
-        s_space : vec4
+///
+/// This is meant to be used to reconstruct interpolated attributes in an
+/// eventual shading (or intermediate) pass.
+pub const LIB_UTIL_FRAMESPACE_GET_BWEIGHTS: GlslLib = ethel::shader_glsl_lib! {
+    vec3 rendrs_FrameSpace_GetBWeights[
+        vS_framespace : vec4
     ] => "
-        vec2 B_uv = s_space.zw;
+        vec2 B_uv = vS_framespace.ba;
         float B_w = 1.0 - B_uv.x - B_uv.y;
         return vec3(B_uv, B_w);
+    "
+};
+
+/// Helper function to extract the normal from the `frame/space`
+/// image target produced by the deferred attribute interpolation pass.
+///
+/// Creates the `rendrs_FrameSpace_GetNormal` function, which takes the
+/// `vec4` sample fetched from the relevant image target, which is the
+/// 'framespace'.
+///
+/// The function will retrieve the `RG` components of the sample,
+/// which correspond to *normalized* octahedron-encoded coordinates of the
+/// normal.
+/// From there, the normal is reconstructed to a 3d vector and returned.
+///
+/// Requires [`rendrs_unpackOctahedron`](crate::pack::PACK_OCTAHEDRON_DECODE).
+///
+/// This is meant to be used to reconstruct interpolated attributes in an
+/// eventual shading (or intermediate) pass.
+pub const LIB_UTIL_FRAMESPACE_GET_NORMAL: GlslLib = ethel::shader_glsl_lib! {
+    vec3 rendrs_FrameSpace_GetNormal[
+        vS_framespace : vec4
+    ] => "
+        vec2 N_oct = vS_framespace.rg * 2.0 - 1.0;
+        return rendrs_unpackOctahedron(N_oct);
     "
 };
 
@@ -568,6 +612,9 @@ pub const LIB_UTIL_GET_BWEIGHTS: GlslLib = ethel::shader_glsl_lib! {
 /// * the barycentric weights `vec3` as obtained from [`rendrs_GetBWeights`]
 ///
 /// [`rendrs_GetBWeights`]: LIB_UTIL_GET_BWEIGHTS
+///
+/// This is meant to be used to reconstruct interpolated attributes in an
+/// eventual shading (or intermediate) pass.
 pub const LIB_INTERP_ATTRIB: GlslLib = GlslLib::new(
     "
     float rendrs_InterpAttrib(float a0, float a1, float a2, vec3 w) {
@@ -594,6 +641,9 @@ pub const LIB_INTERP_ATTRIB: GlslLib = GlslLib::new(
 /// * the inverse view-projection matrix
 ///
 /// Returns the world-position as a 3d vector.
+///
+/// This is meant to be used to reconstruct interpolated attributes in an
+/// eventual shading (or intermediate) pass.
 pub const LIB_DEPTH_WORLDPOS: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_DepthWorldPosition[
         s_depth     : float,
@@ -602,7 +652,7 @@ pub const LIB_DEPTH_WORLDPOS: GlslLib = ethel::shader_glsl_lib! {
     ] => "
         vec4 NDC = vec4(v_uv_screen * 2.0 - 1.0, s_depth, 1.0);
         vec4 WHV = m_vp_inv * NDC;
-        return WHV.xyz / WHV.z;
+        return WHV.xyz / WHV.w;
     "
 };
 
