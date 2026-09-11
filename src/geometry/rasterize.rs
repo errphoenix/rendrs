@@ -565,7 +565,7 @@ ethel::shader_glsl_compute! {
             vec2 dUv2 = b_uv2 - b_uv0;
             vec2 ddxUv = (dUv1 * (s_v2.y - s_v0.y) - dUv2 * (s_v1.y - s_v0.y)) * inv_det;
             vec2 ddyUv = (dUv2 * (s_v1.x - s_v0.x) - dUv1 * (s_v2.x - s_v0.x)) * inv_det;
-            imageStore(ima_grads, px, ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y));
+            imageStore(ima_grads, px, vec4(ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y));
             ";
         }
     }
