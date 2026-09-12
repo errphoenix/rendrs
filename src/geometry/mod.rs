@@ -8,9 +8,8 @@ pub use rasterize::{
     geom_rasterize_target,
 };
 pub use shader::{
-    SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_RENDERVERTEX,
-    SSBO_BINDING_GBANK_TRIANGLE, SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS, TYPE_DOMAIN_DATA,
-    TYPE_TRIANGLE_ATTRIBS,
+    SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_TRIANGLE,
+    SSBO_BINDING_GBANK_VERTEX, TYPE_DOMAIN_DATA, TYPE_TRIANGLE_ATTRIBS,
 };
 
 pub mod dispatch;
@@ -26,20 +25,6 @@ pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
 /// Max amount of domains submitted in a single geometry dispatch.
 pub const MAX_DOMAIN_COUNT: u32 = 131_070;
 pub const DOMAIN_SIZE: u32 = 64;
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct RenderVertex {
-    pub pos_x: f32,
-    pub pos_y: f32,
-    pub pos_z: f32,
-    pub norm_oct_x: f32,
-    pub norm_oct_y: f32,
-    pub tan_oct_x: f32,
-    pub tan_oct_y: f32,
-    pub uv_x: f32,
-    pub uv_y: f32,
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -73,9 +58,114 @@ pub struct TriangleAttribs {
     pub geometry_id: u32,
 }
 
-pub type VertexBuffer = SingleBuffer<RenderVertex>;
-pub type TriangleBuffer = SingleBuffer<[u32; 3]>;
-pub type TriangleAttribsBuffer = SingleBuffer<TriangleAttribs>;
+pub trait HasVertexBuffers: GpuResource + std::fmt::Debug + 'static {
+    const CAP: usize;
+    fn new() -> Self;
+    fn bind_positions(&self, index: u32);
+    fn bind_normals(&self, index: u32);
+    fn bind_uvs(&self, index: u32);
+    fn bind_arrays(&self, index: u32);
+}
+pub trait HasTriangleBuffers: GpuResource + std::fmt::Debug + 'static {
+    const CAP: usize;
+    fn new() -> Self;
+    fn bind_indices(&self, index: u32);
+    fn bind_attribs(&self, index: u32);
+    fn bind_arrays(&self, index: u32);
+}
+
+crate::geometry_buffers!(
+    vertices = 1000;
+    triangles = 500;
+);
+
+#[macro_export]
+macro_rules! geometry_buffers_impls {
+    (
+        $vb:ty;
+        $tb:ty;
+        $valloc:expr;
+        $talloc:expr;
+    ) => {
+        pub type VertexBuffers = $vb;
+        pub type TriangleBuffers = $tb;
+        impl $crate::geometry::HasVertexBuffers for VertexBuffers {
+            const CAP: usize = $valloc;
+            fn new() -> Self {
+                <$vb>::new()
+            }
+            fn bind_positions(&self, index: u32) {
+                self.bind_ssbo_positions(Some(index));
+            }
+            fn bind_normals(&self, index: u32) {
+                self.bind_ssbo_normals(Some(index));
+            }
+            fn bind_uvs(&self, index: u32) {
+                self.bind_ssbo_uvs(Some(index));
+            }
+            fn bind_arrays(&self, index: u32) {
+                self.bind_ssbo_arrays(Some(index));
+            }
+        }
+        impl $crate::geometry::HasTriangleBuffers for TriangleBuffers {
+            const CAP: usize = $talloc;
+            fn new() -> Self {
+                <$tb>::new()
+            }
+            fn bind_indices(&self, index: u32) {
+                self.bind_ssbo_indices(Some(index));
+            }
+            fn bind_attribs(&self, index: u32) {
+                self.bind_ssbo_attribs(Some(index));
+            }
+            fn bind_arrays(&self, index: u32) {
+                self.bind_ssbo_arrays(Some(index));
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! geometry_buffers {
+    (
+        vertices  = $valloc:expr;
+        triangles = $talloc:expr;
+    ) => {
+        ethel::typed_part_buffer! {
+            const Vertex : 3, {
+                enum Positions: $valloc => {
+                    type [f32; 3];
+                    bind 0;
+                };
+                enum Normals: $valloc => {
+                    type [f32; 2];
+                    bind 1;
+                };
+                enum Uvs: $valloc => {
+                    type [f32; 2];
+                    bind 2;
+                };
+            }
+        }
+        ethel::typed_part_buffer! {
+            const Triangle : 2, {
+                enum Indices: $talloc => {
+                    type [u32; 3];
+                    bind 0;
+                };
+                enum Attribs: $talloc => {
+                    type TriangleAttribs;
+                    bind 1;
+                };
+            }
+        }
+        $crate::geometry_buffers_impls! {
+            VertexPartitionedBuffer;
+            TrianglePartitionedBuffer;
+            $valloc; $talloc;
+        }
+    };
+}
 
 /// Atomic counters buffer.
 ///
@@ -97,44 +187,34 @@ impl GeoCounters {
 }
 
 #[derive(Debug, Default)]
-pub struct GeometryBank {
-    vertex_cap: usize,
-    triangle_cap: usize,
-    vert: VertexBuffer,
-    triangle: TriangleBuffer,
-    triangle_attribs: TriangleAttribsBuffer,
+pub struct GeometryBank<V: HasVertexBuffers, T: HasTriangleBuffers> {
+    vertex: V,
+    triangle: T,
     gcounter: GCounterBuffer,
 }
-impl GeometryBank {
-    pub fn new(vertex_cap: usize, triangle_cap: usize) -> Self {
+impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
+    pub fn new() -> Self {
         Self {
-            vertex_cap,
-            triangle_cap,
-            vert: SingleBuffer::zeroed(vertex_cap),
-            triangle: SingleBuffer::zeroed(triangle_cap),
-            triangle_attribs: SingleBuffer::zeroed(triangle_cap),
+            vertex: V::new(),
+            triangle: T::new(),
             gcounter: SingleBuffer::zeroed(1),
         }
     }
 
     pub const fn vertex_cap(&self) -> usize {
-        self.vertex_cap
+        V::CAP
     }
 
     pub const fn triangle_cap(&self) -> usize {
-        self.triangle_cap
+        T::CAP
     }
 
-    pub const fn vertex_buffer(&self) -> &VertexBuffer {
-        &self.vert
+    pub const fn vertex_buffers(&self) -> &V {
+        &self.vertex
     }
 
-    pub const fn triangle_buffer(&self) -> &TriangleBuffer {
+    pub const fn triangle_buffers(&self) -> &T {
         &self.triangle
-    }
-
-    pub const fn triangle_attribs_buffer(&self) -> &TriangleAttribsBuffer {
-        &self.triangle_attribs
     }
 
     pub const fn gcounter_buffer(&self) -> &GCounterBuffer {
@@ -151,28 +231,46 @@ impl GeometryBank {
         dst
     }
 
-    pub fn index_buffer(&self) -> u32 {
-        self.triangle.resource_id()
-    }
-
+    /// Use the triangle buffers' internal indices buffer ID to use as EBO.
     pub fn bind_index_buffer(&self) {
+        // DrawElements is dispatched with offset 0 (which matches the
+        // buffer's layout) and length is guaranted to be lesser than its
+        // capacity, as geometry is discarded beyond that range.
         unsafe {
             janus::gl::BindBuffer(janus::gl::ELEMENT_ARRAY_BUFFER, self.triangle.resource_id());
         }
     }
 
-    pub fn bind_data_buffers_to(&self, v_index: u32, tri_index: u32, trimeta_index: u32) {
-        self.vert.bind_shader_storage(v_index, 0);
-        self.triangle.bind_shader_storage(tri_index, 0);
-        self.triangle_attribs.bind_shader_storage(trimeta_index, 0);
+    /// Binds the vertex buffers to a single bind point as arrays.
+    ///
+    /// Note that the ssbo block layout and array lengths must match the
+    /// vertex buffers' internal layout.
+    pub fn bind_vertex_buffers_to(&self, index: u32) {
+        self.vertex.bind_arrays(index);
     }
 
-    pub fn bind_data_buffers(&self) {
-        self.bind_data_buffers_to(
-            SSBO_BINDING_GBANK_RENDERVERTEX,
-            SSBO_BINDING_GBANK_TRIANGLE,
-            SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS,
-        );
+    /// Binds the triangle buffers to a single bind point as arrays.
+    ///
+    /// Note that the ssbo block layout and array lengths must match the
+    /// triangle buffers' internal layout.
+    pub fn bind_triangle_buffers_to(&self, index: u32) {
+        self.triangle.bind_arrays(index);
+    }
+
+    /// Binds the vertex buffers to a single bind point as arrays.
+    ///
+    /// Note that the ssbo block layout and array lengths must match the
+    /// vertex buffers' internal layout.
+    pub fn bind_vertex_buffers(&self) {
+        self.vertex.bind_arrays(SSBO_BINDING_GBANK_VERTEX);
+    }
+
+    /// Binds the triangle buffers to a single bind point as arrays.
+    ///
+    /// Note that the ssbo block layout and array lengths must match the
+    /// triangle buffers' internal layout.
+    pub fn bind_triangle_buffers(&self) {
+        self.triangle.bind_arrays(SSBO_BINDING_GBANK_TRIANGLE);
     }
 
     pub fn bind_gcounter_buffer_to(&self, index: u32) {

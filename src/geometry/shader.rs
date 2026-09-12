@@ -1,18 +1,18 @@
 use ethel::shader::{GlslStorage, GlslStruct};
 
-ethel::shader_glsl_struct! {
-    struct RenderVertex {
-        pos_x : f32 => float
-        pos_y : f32 => float
-        pos_z : f32 => float
-        norm_oct_x : f32 => float
-        norm_oct_y : f32 => float
-        tan_oct_x : f32 => float
-        tan_oct_y : f32 => float
-        uv_x : f32 => float
-        uv_y : f32 => float
-    }
-}
+// ethel::shader_glsl_struct! {
+//     struct RenderVertex {
+//         pos_x : f32 => float
+//         pos_y : f32 => float
+//         pos_z : f32 => float
+//         norm_oct_x : f32 => float
+//         norm_oct_y : f32 => float
+//         tan_oct_x : f32 => float
+//         tan_oct_y : f32 => float
+//         uv_x : f32 => float
+//         uv_y : f32 => float
+//     }
+// }
 
 ethel::shader_glsl_struct! {
     struct DomainData {
@@ -27,49 +27,30 @@ ethel::shader_glsl_struct! {
     }
 }
 
-pub const TYPE_RENDERVERTEX: GlslStruct = RenderVertexGlslStruct::as_definition();
+//pub const TYPE_RENDERVERTEX: GlslStruct = RenderVertexGlslStruct::as_definition();
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 
 macro_rules! ssbo_binding {
-    (Rendrs_GBANK_RenderVertex) => {
+    (Rendrs_GBANK_VertexBuffers) => {
         0
     };
-    (Rendrs_GBANK_Triangle) => {
+    (Rendrs_GBANK_TriangleBuffers) => {
         1
     };
-    (Rendrs_GBANK_TriangleAttribs) => {
+    (Rendrs_GBANK_GCounter) => {
         2
     };
-    (Rendrs_GBANK_GCounter) => {
-        3
-    };
     (Rendrs_Domains) => {
-        4
+        3
     };
 }
 
-pub const SSBO_BINDING_GBANK_RENDERVERTEX: u32 = ssbo_binding!(Rendrs_GBANK_RenderVertex);
-pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_Triangle);
-pub const SSBO_BINDING_GBANK_TRIANGLE_ATTRIBS: u32 = ssbo_binding!(Rendrs_GBANK_TriangleAttribs);
+pub const SSBO_BINDING_GBANK_VERTEX: u32 = ssbo_binding!(Rendrs_GBANK_VertexBuffers);
+pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_TriangleBuffers);
 pub const SSBO_BINDING_GBANK_GCOUNTER: u32 = ssbo_binding!(Rendrs_GBANK_GCounter);
 pub const SSBO_BINDING_DOMAINS: u32 = ssbo_binding!(Rendrs_Domains);
 
-pub const SSBO_GBANK_RENDERVERTEX: GlslStorage = ethel::shader_glsl_ssbo! {
-    buf Rendrs_GBANK_RenderVertex => {
-        [dyn_array RenderVertex : rendrs_gbank_vertex]
-    }
-};
-pub const SSBO_GBANK_TRIANGLE: GlslStorage = ethel::shader_glsl_ssbo! {
-    buf Rendrs_GBANK_Triangle => {
-        [dyn_array uint : rendrs_gbank_triangle => each 3]
-    }
-};
-pub const SSBO_GBANK_TRIANGLE_ATTRIBS: GlslStorage = ethel::shader_glsl_ssbo! {
-    buf Rendrs_GBANK_TriangleAttribs => {
-        [dyn_array TriangleAttribs : rendrs_gbank_triangle_attribs]
-    }
-};
 pub const SSBO_GBANK_GCOUNTER: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_GCounter => {
         uint : rendrs_gbank_gcounter_vertex;
@@ -218,6 +199,11 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 macro_rules! geometry_submission_job {
     (
         $name:ident => {
+            source {
+                vertex => $vb_source:ty;
+                triangle => $tb_source:ty;
+            };
+
             $(uniform {
                 $(length $u_len:literal, $u_gl_name:ident: $u_gl_type:ident => $u_r_type:ty;)+
             })?
@@ -279,16 +265,27 @@ macro_rules! geometry_submission_job {
                     $(on $idx $(, for $len)? => $ui_name : $image_type as $format $($m)* ; )+
                 };)?
                 type {
-                    $crate::geometry::shader::TYPE_RENDERVERTEX
-                    $crate::geometry::shader::TYPE_DOMAIN_DATA
                     $crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+                    $crate::geometry::shader::TYPE_DOMAIN_DATA
 
                     $($($type_glsl)+)?
                 };
                 ssbo {
-                    $crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-                    $crate::geometry::shader::SSBO_GBANK_TRIANGLE
-                    $crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
+                    //todo
+                    ethel::shader_glsl_ssbo! {
+                        buf Rendrs_GBANK_VertexBuffers => {
+                            float : rendrs_gbank_vertex_positions[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][3];
+                            float : rendrs_gbank_vertex_normals[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][2];
+                            float : rendrs_gbank_vertex_uvs[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][2];
+                        }
+                    }
+                    ethel::shader_glsl_ssbo! {
+                        buf Rendrs_GBANK_TriangleBuffers => {
+                            uint : rendrs_gbank_triangle_indices[ <$tb_source as $crate::geometry::HasTriangleBuffers>::CAP ][3];
+                            TriangleAttribs : rendrs_gbank_triangle_attribs[ <$tb_source as $crate::geometry::HasTriangleBuffers>::CAP ];
+                        }
+                    }
+
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
                     $crate::geometry::shader::SSBO_DOMAINS
 
@@ -329,11 +326,9 @@ macro_rules! geometry_submission_job {
 
                         // alloc N, return base
                         uint AllocVertex(uint count) {
-                            //if (count == 0) return 0;
                             return atomicAdd(rendrs_gbank_gcounter_vertex, count);
                         }
                         uint AllocTriangle(uint count) {
-                            //if (count == 0) return 0;
                             return atomicAdd(rendrs_gbank_gcounter_triangle, count);
                         }
                         "
@@ -341,38 +336,70 @@ macro_rules! geometry_submission_job {
                     // vertex/triangle data feeding functions
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
-                        void VertexData(uint index, vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
-                            rendrs_gbank_vertex[index] = RenderVertex(
-                                p.x, p.y, p.z,
-                                n_oct.x, n_oct.y,
-                                t_oct.x, t_oct.y,
+                        void VertexDataPosition(uint index, vec3 position) {
+                            rendrs_gbank_vertex_positions[index] = float[](
+                                position.x, position.y, position.z
+                            );
+                        }
+                        void VertexDataNormal(uint index, vec2 normal_oct) {
+                            rendrs_gbank_vertex_normals[index] = float[](
+                                normal_oct.x, normal_oct.y
+                            );
+                        }
+                        void VertexDataNormal(uint index, vec3 normal) {
+                            VertexDataNormal(index, rendrs_packOctahedron(normal));
+                        }
+                        void VertexDataUv(uint index, vec2 uv) {
+                            rendrs_gbank_vertex_uvs[index] = float[](
                                 uv.x, uv.y
                             );
                         }
-                        void VertexData(uint index, vec3 p, vec3 n, vec3 t, vec2 uv) {
-                            vec2 n_oct = rendrs_packOctahedron(n);
-                            vec2 t_oct = rendrs_packOctahedron(t);
-                            VertexData(index, p, n_oct, t_oct, uv);
+
+                        void VertexData(uint index, vec3 p, vec2 n_oct, vec2 uv) {
+                            VertexDataPosition(index, p);
+                            VertexDataNormal(index, n_oct);
+                            VertexDataUv(index, uv);
                         }
-                        void TriangleData(uint index, uint data[3], uint geom_id) {
-                            rendrs_gbank_triangle[index] = data;
+                        void VertexData(uint index, vec3 p, vec3 n, vec2 uv) {
+                            VertexDataPosition(index, p);
+                            VertexDataNormal(index, n);
+                            VertexDataUv(index, uv);
+                        }
+
+                        void TriangleDataIndices(uint index, uint data[3]) {
+                            rendrs_gbank_triangle_indices[index] = data;
+                        }
+                        void TriangleDataAttribs(uint index, uint geom_id) {
                             TriangleAttribs attribs = TriangleAttribs(geom_id);
                             rendrs_gbank_triangle_attribs[index] = attribs;
+                        }
+                        void TriangleData(uint index, uint data[3], uint geom_id) {
+                            TriangleDataIndices(index, data);
+                            TriangleDataAttribs(index, geom_id);
                         }
                         "
                     });
                     // vertex/triangle getters
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
-                        uint[3] GetTriangle(uint index) {
-                            return rendrs_gbank_triangle[index];
+                        uint[3] GetTriangleIndices(uint index) {
+                            return rendrs_gbank_triangle_indices[index];
                         }
                         TriangleAttribs GetTriangleAttribs(uint index) {
                             return rendrs_gbank_triangle_attribs[index];
                         }
 
-                        RenderVertex GetVertex(uint index) {
-                            return rendrs_gbank_vertex[index];
+                        vec3 GetVertexPosition(uint index) {
+                            float position[3] = rendrs_gbank_vertex_positions[index];
+                            return vec3(position[0], position[1], position[2]);
+                        }
+                        vec2 GetVertexNormal(uint index) {
+                            float normal[2] = rendrs_gbank_vertex_normals[index];
+                            return vec2(normal[0], normal[1]);
+                        }
+                        vec2 GetVertexUv(uint index) {
+                            float uv[2] = rendrs_gbank_vertex_uvs[index];
+                            return vec2(uv[0], uv[1]);
                         }
                         "
                     });

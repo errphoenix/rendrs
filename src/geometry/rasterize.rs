@@ -13,11 +13,11 @@ use janus::{
 
 use crate::{
     ComputePass, DrawPass,
-    geometry::GeometryBank,
+    geometry::{GeometryBank, HasTriangleBuffers, HasVertexBuffers},
     graphics::PixelResolution,
     pack::{PACK_OCTAHEDRON_DECODE, PACK_OCTAHEDRON_ENCODE, PACK_OCTAHEDRON_WRAP_UTIL},
     pipeline::{
-        ImageAccessKind, ImageObject, ImageObjectTarget, OutputObject, Pass, RenderPool,
+        CtxType, ImageAccessKind, ImageObject, ImageObjectTarget, OutputObject, Pass, RenderPool,
         RenderTarget, RenderTargetDescriptor,
     },
 };
@@ -97,13 +97,13 @@ pub fn geom_attribs_gradients_target(
 }
 
 #[derive(Debug)]
-pub struct GeomRasterizePass {
-    inner: DrawPass<GeomRasterizeCtxWrapper, 0, 2>,
+pub struct GeomRasterizePass<V: HasVertexBuffers, T: HasTriangleBuffers> {
+    inner: DrawPass<GeomRasterizeCtxWrapper<V, T>, 0, 2>,
     shader: ShaderGeomRasterize,
     cpy_shader: ComputeShaderGeomRasterCpyOpts,
     opts_buffer: SingleBuffer<DrawElementsIndirectCommand>, //more opts?
 }
-impl GeomRasterizePass {
+impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
     /// Expects an RG32UI `raster_out` color attachment, as returned by
     /// [`geom_rasterize_target`] and a depth attachment.
     pub fn new(raster_out: OutputObject, depth_out: OutputObject) -> Self {
@@ -133,7 +133,8 @@ impl GeomRasterizePass {
                     m_view,
                 } = ctx;
 
-                gbank.bind_data_buffers();
+                //todo
+                //gbank.bind_data_buffers();
                 gbank.bind_gcounter_buffer();
 
                 opts_buffer.bind_shader_storage(G_RASTER_SSBO_BIND_CPYOPTS, 0);
@@ -183,7 +184,7 @@ impl GeomRasterizePass {
     pub fn execute(
         &self,
         render_pool: &RenderPool,
-        gbank: &GeometryBank,
+        gbank: &GeometryBank<V, T>,
         #[cfg(feature = "glam")] m_proj: glam::Mat4,
         #[cfg(feature = "glam")] m_view: glam::Mat4,
         #[cfg(not(feature = "glam"))] m_proj: [f32; 16],
@@ -209,31 +210,38 @@ impl GeomRasterizePass {
 }
 
 #[derive(Debug)]
-pub struct GeomRasterizeCtx<'ctx> {
-    pub gbank: &'ctx GeometryBank,
+pub struct GeomRasterizeCtx<'ctx, V: HasVertexBuffers, T: HasTriangleBuffers> {
+    pub gbank: &'ctx GeometryBank<V, T>,
     pub shader: &'ctx ShaderGeomRasterize,
     pub cpy_shader: &'ctx ComputeShaderGeomRasterCpyOpts,
     pub opts_buffer: &'ctx SingleBuffer<DrawElementsIndirectCommand>,
     pub m_proj: [f32; 16],
     pub m_view: [f32; 16],
 }
-crate::context_wrapper!(for<'ctx> GeomRasterizeCtx);
+#[derive(Debug)]
+pub struct GeomRasterizeCtxWrapper<V: HasVertexBuffers, T: HasTriangleBuffers> {
+    _marker: std::marker::PhantomData<(V, T)>,
+}
+impl<V: HasVertexBuffers, T: HasTriangleBuffers> CtxType for GeomRasterizeCtxWrapper<V, T> {
+    type Ctx<'ctx> = GeomRasterizeCtx<'ctx, V, T>;
+}
 
 ethel::shader_glsl! {
     struct GeomRasterize > [460] {
         common {};
 
+        //todo
         unit ShaderKind::Vertex => [
             uniform {
                 length 1, proj_mat : mat4 => [f32; 16];
                 length 1, view_mat : mat4 => [f32; 16];
             };
-            type {
-                crate::geometry::shader::TYPE_RENDERVERTEX
-            };
-            ssbo {
-                crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-            };
+            // type {
+            //     crate::geometry::shader::TYPE_RENDERVERTEX
+            // };
+            // ssbo {
+            //     crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
+            // };
 
             src() {
                 "
@@ -247,6 +255,7 @@ ethel::shader_glsl! {
             }
         ];
 
+        //todo
         // assumes rg32ui color output
         unit ShaderKind::Pixel => [
             attribs {
@@ -257,9 +266,9 @@ ethel::shader_glsl! {
             type {
                 crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
             };
-            ssbo {
-                crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
-            };
+            // ssbo {
+            //     crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
+            // };
 
             src() {
                 "
@@ -336,21 +345,27 @@ ethel::shader_glsl_struct! {
 }
 
 #[derive(Debug)]
-pub struct AttribInterpolationCtx<'ctx> {
+pub struct AttribInterpolationCtx<'ctx, V: HasVertexBuffers, T: HasTriangleBuffers> {
     pub shader: &'ctx ComputeShaderAttribsInterp,
-    pub gbank: &'ctx GeometryBank,
+    pub gbank: &'ctx GeometryBank<V, T>,
     pub resolution: PixelResolution,
     pub m_proj: [f32; 16],
     pub m_view: [f32; 16],
 }
-crate::context_wrapper!(for<'ctx> AttribInterpolationCtx);
+#[derive(Debug)]
+pub struct AttribInterpolationCtxWrapper<V: HasVertexBuffers, T: HasTriangleBuffers> {
+    _marker: std::marker::PhantomData<(V, T)>,
+}
+impl<V: HasVertexBuffers, T: HasTriangleBuffers> CtxType for AttribInterpolationCtxWrapper<V, T> {
+    type Ctx<'ctx> = AttribInterpolationCtx<'ctx, V, T>;
+}
 
 #[derive(Debug)]
-pub struct AttribInterpolationPass {
-    inner: ComputePass<AttribInterpolationCtxWrapper, 0, 3>,
+pub struct AttribInterpolationPass<V: HasVertexBuffers, T: HasTriangleBuffers> {
+    inner: ComputePass<AttribInterpolationCtxWrapper<V, T>, 0, 3>,
     shader: ComputeShaderAttribsInterp,
 }
-impl AttribInterpolationPass {
+impl<V: HasVertexBuffers, T: HasTriangleBuffers> AttribInterpolationPass<V, T> {
     /// Expects the geometry raster target (generated by the rasterization
     /// pass) as an input image object, and the output framespace and output
     /// gradients targets as created, respectively, by
@@ -397,7 +412,8 @@ impl AttribInterpolationPass {
                         m_view,
                     } = ctx;
 
-                    gbank.bind_data_buffers();
+                    //todo
+                    //gbank.bind_data_buffers();
 
                     let wg_x = resolution.width().div_ceil(8);
                     let wg_y = resolution.height().div_ceil(8);
@@ -416,11 +432,13 @@ impl AttribInterpolationPass {
         &self.shader
     }
 
-    pub const fn inner(&self) -> &ComputePass<AttribInterpolationCtxWrapper, 0, 3> {
+    pub const fn inner(&self) -> &ComputePass<AttribInterpolationCtxWrapper<V, T>, 0, 3> {
         &self.inner
     }
 
-    pub const fn inner_mut(&mut self) -> &mut ComputePass<AttribInterpolationCtxWrapper, 0, 3> {
+    pub const fn inner_mut(
+        &mut self,
+    ) -> &mut ComputePass<AttribInterpolationCtxWrapper<V, T>, 0, 3> {
         &mut self.inner
     }
 
@@ -444,7 +462,7 @@ impl AttribInterpolationPass {
         &self,
         render_pool: &RenderPool,
         resolution: PixelResolution,
-        geometry_bank: &GeometryBank,
+        geometry_bank: &GeometryBank<V, T>,
         #[cfg(feature = "glam")] m_proj: glam::Mat4,
         #[cfg(feature = "glam")] m_view: glam::Mat4,
         #[cfg(not(feature = "glam"))] m_proj: [f32; 16],
@@ -485,15 +503,16 @@ ethel::shader_glsl_compute! {
             on ATTRIB_INTERP_IMAGE_BIND_FRAME => ima_space   : image2D  as rgba16  writeonly;
             on ATTRIB_INTERP_IMAGE_BIND_GRADS => ima_grads   : image2D  as rgba16f writeonly;
         };
-        type {
-            crate::geometry::shader::TYPE_RENDERVERTEX
-            crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
-        };
-        ssbo {
-            crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-            crate::geometry::shader::SSBO_GBANK_TRIANGLE
-            crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
-        };
+        //todo
+        // type {
+        //     crate::geometry::shader::TYPE_RENDERVERTEX
+        //     crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+        // };
+        // ssbo {
+        //     crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
+        //     crate::geometry::shader::SSBO_GBANK_TRIANGLE
+        //     crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
+        // };
         lib {
             PACK_OCTAHEDRON_WRAP_UTIL;
             PACK_OCTAHEDRON_ENCODE;
