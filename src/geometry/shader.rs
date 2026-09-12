@@ -252,6 +252,9 @@ macro_rules! geometry_submission_job {
             [< $name:upper GEOM_IMAGE_COUNT >],
         >;
 
+        const SSBO_GBANK_VERTEX: ethel::shader::GlslStorage = $vb_source::SSBO_ARRAYS;
+        const SSBO_GBANK_TRIANGLE: ethel::shader::GlslStorage = $tb_source::SSBO_ARRAYS;
+
         ethel::shader_glsl_compute! {
             struct [< $name GeomSubmit >] > [460] {
                 workgroup [64, 1, 1];
@@ -272,21 +275,8 @@ macro_rules! geometry_submission_job {
                     $($($type_glsl)+)?
                 };
                 ssbo {
-                    //todo
-                    ethel::shader_glsl_ssbo! {
-                        buf Rendrs_GBANK_VertexBuffers => {
-                            float : rendrs_gbank_vertex_positions[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][3];
-                            float : rendrs_gbank_vertex_normals[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][2];
-                            float : rendrs_gbank_vertex_uvs[ <$vb_source as $crate::geometry::HasVertexBuffers>::CAP ][2];
-                        }
-                    }
-                    ethel::shader_glsl_ssbo! {
-                        buf Rendrs_GBANK_TriangleBuffers => {
-                            uint : rendrs_gbank_triangle_indices[ <$tb_source as $crate::geometry::HasTriangleBuffers>::CAP ][3];
-                            TriangleAttribs : rendrs_gbank_triangle_attribs[ <$tb_source as $crate::geometry::HasTriangleBuffers>::CAP ];
-                        }
-                    }
-
+                    SSBO_GBANK_VERTEX
+                    SSBO_GBANK_TRIANGLE
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
                     $crate::geometry::shader::SSBO_DOMAINS
 
@@ -324,7 +314,6 @@ macro_rules! geometry_submission_job {
                         uint AllocTriangle() {
                             return atomicAdd(rendrs_gbank_gcounter_triangle, 1);
                         }
-
                         // alloc N, return base
                         uint AllocVertex(uint count) {
                             return atomicAdd(rendrs_gbank_gcounter_vertex, count);
@@ -355,7 +344,6 @@ macro_rules! geometry_submission_job {
                                 uv.x, uv.y
                             );
                         }
-
                         void VertexData(uint index, vec3 p, vec2 n_oct, vec2 uv) {
                             VertexDataPosition(index, p);
                             VertexDataNormal(index, n_oct);
@@ -366,7 +354,6 @@ macro_rules! geometry_submission_job {
                             VertexDataNormal(index, n);
                             VertexDataUv(index, uv);
                         }
-
                         void TriangleDataIndices(uint index, uint data[3]) {
                             rendrs_gbank_triangle_indices[index] = data;
                         }
@@ -412,15 +399,14 @@ macro_rules! geometry_submission_job {
                             TriangleData(triangle_index, indices, geom_id);
                             return triangle_index;
                         }
-                        uint AllocVertexData(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
+                        uint AllocVertexData(vec3 p, vec2 n_oct, vec2 uv) {
                             uint vertex_index = AllocVertex();
-                            VertexData(vertex_index, p, n_oct, t_oct, uv);
+                            VertexData(vertex_index, p, n_oct, uv);
                             return vertex_index;
                         }
-                        uint AllocVertexData(vec3 p, vec3 n, vec3 t, vec2 uv) {
+                        uint AllocVertexData(vec3 p, vec3 n, vec2 uv) {
                             vec2 n_oct = rendrs_packOctahedron(n);
-                            vec2 t_oct = rendrs_packOctahedron(t);
-                            return AllocVertexData(p, n_oct, t_oct, uv);
+                            return AllocVertexData(p, n_oct, uv);
                         }
                         "
                     });

@@ -84,6 +84,39 @@ macro_rules! geometry_buffers_impls {
     ) => {
         pub type VertexBuffers = $vb;
         pub type TriangleBuffers = $tb;
+        impl VertexBuffers {
+            pub const SSBO_ARRAYS: ethel::shader::GlslStorage =
+                ethel::shader::GlslStorage::new(concat!(
+                    "layout(std430, binding = ",
+                    0, // must match value defined in shader module
+                    ") buffer Rendrs_GBANK_VertexBuffers\n{\n",
+                    "    float rendrs_gbank_vertex_positions[",
+                    $valloc,
+                    "][3];\n",
+                    "    float rendrs_gbank_vertex_normals[",
+                    $valloc,
+                    "][2];\n",
+                    "    float rendrs_gbank_vertex_uvs[",
+                    $valloc,
+                    "][2];\n",
+                    "};\n"
+                ));
+        }
+        impl TriangleBuffers {
+            pub const SSBO_ARRAYS: ethel::shader::GlslStorage =
+                ethel::shader::GlslStorage::new(concat!(
+                    "layout(std430, binding = ",
+                    1, // must match value defined in shader module
+                    ") buffer Rendrs_GBANK_TriangleBuffers\n{\n",
+                    "    uint rendrs_gbank_triangle_indices[",
+                    $talloc,
+                    "][3];\n",
+                    "    TriangleAttribs rendrs_gbank_triangle_attribs[",
+                    $talloc,
+                    "];\n",
+                    "};\n"
+                ));
+        }
         impl $crate::geometry::HasVertexBuffers for VertexBuffers {
             const CAP: usize = $valloc;
             fn new() -> Self {
@@ -149,11 +182,21 @@ macro_rules! geometry_buffers {
                     bind 0;
                 };
                 enum Attribs: $talloc => {
-                    type TriangleAttribs;
+                    type $crate::geometry::TriangleAttribs;
                     bind 1;
                 };
             }
         }
+
+        pub const GEOM_ALLOC_VERTEX: usize = $valloc;
+        pub const GEOM_ALLOC_TRIANGLE: usize = $talloc;
+
+        pub type GeomRasterizePass =
+            $crate::geometry::GeomRasterizePass<VertexBuffers, TriangleBuffers>;
+        pub type AttribInterpolationPass =
+            $crate::geometry::AttribInterpolationPass<VertexBuffers, TriangleBuffers>;
+        pub type GeometryBank = $crate::geometry::GeometryBank<VertexBuffers, TriangleBuffers>;
+
         $crate::geometry_buffers_impls! {
             VertexPartitionedBuffer;
             TrianglePartitionedBuffer;

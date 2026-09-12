@@ -133,8 +133,21 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                     m_view,
                 } = ctx;
 
-                //todo
-                //gbank.bind_data_buffers();
+                gbank
+                    .vertex_buffers()
+                    .bind_positions(G_RASTER_SSBO_BIND_VERTEX_POSITIONS);
+                gbank
+                    .vertex_buffers()
+                    .bind_normals(G_RASTER_SSBO_BIND_VERTEX_NORMALS);
+                gbank
+                    .vertex_buffers()
+                    .bind_uvs(G_RASTER_SSBO_BIND_VERTEX_UVS);
+                gbank
+                    .triangle_buffers()
+                    .bind_indices(G_RASTER_SSBO_BIND_TRIANGLE_INDICES);
+                gbank
+                    .triangle_buffers()
+                    .bind_attribs(G_RASTER_SSBO_BIND_TRIANGLE_ATTRIBS);
                 gbank.bind_gcounter_buffer();
 
                 opts_buffer.bind_shader_storage(G_RASTER_SSBO_BIND_CPYOPTS, 0);
@@ -226,6 +239,39 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> CtxType for GeomRasterizeCtxWra
     type Ctx<'ctx> = GeomRasterizeCtx<'ctx, V, T>;
 }
 
+macro_rules! ssbo_binding {
+    (rendrs_Geom_Rasterize_VertexPositions) => {
+        0
+    };
+    // 2 reserved for gcounters
+    (rendrs_Geom_Rasterize_VertexNormals) => {
+        1
+    };
+    (rendrs_Geom_Rasterize_VertexUvs) => {
+        3
+    };
+    (rendrs_Geom_Rasterize_TriangleIndices) => {
+        4
+    };
+    (rendrs_Geom_Rasterize_TriangleAttribs) => {
+        5
+    };
+    (rendrs_Geom_Rasterize_CpyOptsOut) => {
+        10
+    };
+}
+
+pub const G_RASTER_SSBO_BIND_VERTEX_POSITIONS: u32 =
+    ssbo_binding!(rendrs_Geom_Rasterize_VertexPositions);
+pub const G_RASTER_SSBO_BIND_VERTEX_NORMALS: u32 =
+    ssbo_binding!(rendrs_Geom_Rasterize_VertexNormals);
+pub const G_RASTER_SSBO_BIND_VERTEX_UVS: u32 = ssbo_binding!(rendrs_Geom_Rasterize_VertexUvs);
+pub const G_RASTER_SSBO_BIND_TRIANGLE_INDICES: u32 =
+    ssbo_binding!(rendrs_Geom_Rasterize_TriangleIndices);
+pub const G_RASTER_SSBO_BIND_TRIANGLE_ATTRIBS: u32 =
+    ssbo_binding!(rendrs_Geom_Rasterize_TriangleAttribs);
+pub const G_RASTER_SSBO_BIND_CPYOPTS: u32 = ssbo_binding!(rendrs_Geom_Rasterize_CpyOptsOut);
+
 ethel::shader_glsl! {
     struct GeomRasterize > [460] {
         common {};
@@ -236,18 +282,21 @@ ethel::shader_glsl! {
                 length 1, proj_mat : mat4 => [f32; 16];
                 length 1, view_mat : mat4 => [f32; 16];
             };
-            // type {
-            //     crate::geometry::shader::TYPE_RENDERVERTEX
-            // };
-            // ssbo {
-            //     crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-            // };
+            ssbo {
+                // gbank ssbos stored with runtime arrays as we are not
+                // concerned  with the number of ssbo bindings here
+                ethel::shader_glsl_ssbo! {
+                    buf rendrs_Geom_Rasterize_VertexPositions => {
+                        [dyn_array float : rendrs_vertex_positions => each 3]
+                    }
+                }
+            };
 
             src() {
                 "
-                RenderVertex vertex = rendrs_gbank_vertex[gl_VertexID];
+                float position[] = rendrs_vertex_positions[gl_VertexID];
 
-                vec3 P_model = vec3(vertex.pos_x, vertex.pos_y, vertex.pos_z);
+                vec3 P_model = vec3(position[0], position[1], position[2]);
                 vec4 P_world = proj_mat * view_mat * vec4(P_model, 1.0);
 
                 gl_Position = P_world;
@@ -255,7 +304,6 @@ ethel::shader_glsl! {
             }
         ];
 
-        //todo
         // assumes rg32ui color output
         unit ShaderKind::Pixel => [
             attribs {
@@ -266,13 +314,19 @@ ethel::shader_glsl! {
             type {
                 crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
             };
-            // ssbo {
-            //     crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
-            // };
+            ssbo {
+                // gbank ssbos stored with runtime arrays as we are not
+                // concerned  with the number of ssbo bindings here
+                ethel::shader_glsl_ssbo! {
+                    buf rendrs_Geom_Rasterize_TriangleAttribs => {
+                        [dyn_array TriangleAttribs : rendrs_triangle_attribs]
+                    }
+                }
+            };
 
             src() {
                 "
-                TriangleAttribs tri_attribs = rendrs_gbank_triangle_attribs[gl_PrimitiveID];
+                TriangleAttribs tri_attribs = rendrs_triangle_attribs[gl_PrimitiveID];
 
                 //todo: more metadata in g channel (tri-atts), bit-packing
                 uint R = gl_PrimitiveID + 1;
@@ -284,14 +338,6 @@ ethel::shader_glsl! {
         ];
     }
 }
-
-macro_rules! ssbo_binding {
-    (rendrs_GeomRasterCpyOpts_Outbuf) => {
-        10
-    };
-}
-
-pub const G_RASTER_SSBO_BIND_CPYOPTS: u32 = ssbo_binding!(rendrs_GeomRasterCpyOpts_Outbuf);
 
 ethel::shader_glsl_compute! {
     struct GeomRasterCpyOpts > [460] {
@@ -305,7 +351,7 @@ ethel::shader_glsl_compute! {
             super::shader::SSBO_GBANK_GCOUNTER
 
             ethel::shader_glsl_ssbo! {
-                buf rendrs_GeomRasterCpyOpts_Outbuf => {
+                buf rendrs_Geom_Rasterize_CpyOptsOut => {
                     DrawElementsIndirectCommand : out_cmd;
                 }
             }
@@ -412,8 +458,21 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> AttribInterpolationPass<V, T> {
                         m_view,
                     } = ctx;
 
-                    //todo
-                    //gbank.bind_data_buffers();
+                    gbank
+                        .vertex_buffers()
+                        .bind_positions(G_RASTER_SSBO_BIND_VERTEX_POSITIONS);
+                    gbank
+                        .vertex_buffers()
+                        .bind_normals(G_RASTER_SSBO_BIND_VERTEX_NORMALS);
+                    gbank
+                        .vertex_buffers()
+                        .bind_uvs(G_RASTER_SSBO_BIND_VERTEX_UVS);
+                    gbank
+                        .triangle_buffers()
+                        .bind_indices(G_RASTER_SSBO_BIND_TRIANGLE_INDICES);
+                    gbank
+                        .triangle_buffers()
+                        .bind_attribs(G_RASTER_SSBO_BIND_TRIANGLE_ATTRIBS);
 
                     let wg_x = resolution.width().div_ceil(8);
                     let wg_y = resolution.height().div_ceil(8);
@@ -503,16 +562,38 @@ ethel::shader_glsl_compute! {
             on ATTRIB_INTERP_IMAGE_BIND_FRAME => ima_space   : image2D  as rgba16  writeonly;
             on ATTRIB_INTERP_IMAGE_BIND_GRADS => ima_grads   : image2D  as rgba16f writeonly;
         };
-        //todo
-        // type {
-        //     crate::geometry::shader::TYPE_RENDERVERTEX
-        //     crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
-        // };
-        // ssbo {
-        //     crate::geometry::shader::SSBO_GBANK_RENDERVERTEX
-        //     crate::geometry::shader::SSBO_GBANK_TRIANGLE
-        //     crate::geometry::shader::SSBO_GBANK_TRIANGLE_ATTRIBS
-        // };
+        type {
+            crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+        };
+        ssbo {
+            // gbank ssbos stored with runtime arrays as we are not
+            // concerned  with the number of ssbo bindings here
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_Geom_Rasterize_VertexPositions => {
+                    [dyn_array float : rendrs_vertex_positions => each 3]
+                }
+            }
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_Geom_Rasterize_VertexNormals => {
+                    [dyn_array float : rendrs_vertex_normals => each 2]
+                }
+            }
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_Geom_Rasterize_VertexUvs => {
+                    [dyn_array float : rendrs_vertex_uvs => each 2]
+                }
+            }
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_Geom_Rasterize_TriangleIndices => {
+                    [dyn_array uint : rendrs_triangle_indices => each 3]
+                }
+            }
+            ethel::shader_glsl_ssbo! {
+                buf rendrs_Geom_Rasterize_TriangleAttribs => {
+                    [dyn_array TriangleAttribs : rendrs_triangle_attribs]
+                }
+            }
+        };
         lib {
             PACK_OCTAHEDRON_WRAP_UTIL;
             PACK_OCTAHEDRON_ENCODE;
@@ -535,23 +616,22 @@ ethel::shader_glsl_compute! {
             }
             Tid -= 1; //0 is a valid index but rasterizer offsets valid tris to 1
 
-            uint b_tri[3] = rendrs_gbank_triangle[Tid];
-            //todo: split vertex to SoA
-            RenderVertex w_v0 = rendrs_gbank_vertex[b_tri[0]];
-            RenderVertex w_v1 = rendrs_gbank_vertex[b_tri[1]];
-            RenderVertex w_v2 = rendrs_gbank_vertex[b_tri[2]];
-            vec3 b_p0  = vec3(w_v0.pos_x, w_v0.pos_y, w_v0.pos_z);
-            vec3 b_p1  = vec3(w_v1.pos_x, w_v1.pos_y, w_v1.pos_z);
-            vec3 b_p2  = vec3(w_v2.pos_x, w_v2.pos_y, w_v2.pos_z);
-            vec2 b_uv0 = vec2(w_v0.uv_x, w_v0.uv_y);
-            vec2 b_uv1 = vec2(w_v1.uv_x, w_v1.uv_y);
-            vec2 b_uv2 = vec2(w_v2.uv_x, w_v2.uv_y);
+            uint b_tri[3] = rendrs_triangle_indices[Tid];
+            float b_p0[3] = rendrs_vertex_positions[b_tri[0]];
+            float b_p1[3] = rendrs_vertex_positions[b_tri[1]];
+            float b_p2[3] = rendrs_vertex_positions[b_tri[2]];
+            float b_n0[2] = rendrs_vertex_normals[b_tri[0]];
+            float b_n1[2] = rendrs_vertex_normals[b_tri[1]];
+            float b_n2[2] = rendrs_vertex_normals[b_tri[2]];
+            float b_u0[2] = rendrs_vertex_uvs[b_tri[0]];
+            float b_u1[2] = rendrs_vertex_uvs[b_tri[1]];
+            float b_u2[2] = rendrs_vertex_uvs[b_tri[2]];
 
             mat4 MVP = proj_mat * view_mat;
 
-            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p0);
-            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p1);
-            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, b_p2);
+            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p0[0], b_p0[1], b_p0[2]));
+            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p1[0], b_p1[1], b_p1[2]));
+            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p2[0], b_p2[1], b_p2[2]));
 
             vec2 px_c = vec2(px) + 0.5;
             float inv_det = 1.0 / ((s_v1.x - s_v0.x) * (s_v2.y - s_v0.y) - (s_v2.x - s_v0.x) * (s_v1.y - s_v0.y));
@@ -559,9 +639,9 @@ ethel::shader_glsl_compute! {
             float B_w = ((s_v1.x - s_v0.x) * (px_c.y - s_v0.y) - (s_v1.y - s_v0.y) * (px_c.x - s_v0.x)) * inv_det;
             float B_u = 1.0 - B_v - B_w;
 
-            float w_p0 = (MVP * vec4(b_p0, 1.0)).w;
-            float w_p1 = (MVP * vec4(b_p1, 1.0)).w;
-            float w_p2 = (MVP * vec4(b_p2, 1.0)).w;
+            float w_p0 = (MVP * vec4(b_p0[0], b_p0[1], b_p0[2], 1.0)).w;
+            float w_p1 = (MVP * vec4(b_p1[0], b_p1[1], b_p1[2], 1.0)).w;
+            float w_p2 = (MVP * vec4(b_p2[0], b_p2[1], b_p2[2], 1.0)).w;
             float y_0 = B_u / w_p0;
             float y_1 = B_v / w_p1;
             float y_2 = B_w / w_p2;
@@ -570,18 +650,15 @@ ethel::shader_glsl_compute! {
             B_v = y_1 / y_sum;
             B_w = y_2 / y_sum;
 
-            vec2 b_n0e = vec2(w_v0.norm_oct_x, w_v0.norm_oct_y);
-            vec3 b_n0  = rendrs_unpackOctahedron(b_n0e);
-            vec2 b_n1e = vec2(w_v1.norm_oct_x, w_v1.norm_oct_y);
-            vec3 b_n1  = rendrs_unpackOctahedron(b_n1e);
-            vec2 b_n2e = vec2(w_v2.norm_oct_x, w_v2.norm_oct_y);
-            vec3 b_n2  = rendrs_unpackOctahedron(b_n2e);
-            vec3 N  = normalize(b_n0 * B_u + b_n1 * B_v + b_n2 * B_w);
+            vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
+            vec3 b_n1d = rendrs_unpackOctahedron(vec2(b_n1[0], b_n1[1]));
+            vec3 b_n2d = rendrs_unpackOctahedron(vec2(b_n2[0], b_n2[1]));
+            vec3 N  = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
             vec2 Ne = rendrs_packOctahedron(N) * 0.5 + 0.5; //unorm16
             imageStore(ima_space, px, vec4(Ne.x, Ne.y, B_u, B_v));
 
-            vec2 dUv1 = b_uv1 - b_uv0;
-            vec2 dUv2 = b_uv2 - b_uv0;
+            vec2 dUv1 = vec2(b_u1[0], b_u1[1]) - vec2(b_u0[0], b_u0[1]);
+            vec2 dUv2 = vec2(b_u2[0], b_u2[1]) - vec2(b_u0[0], b_u0[1]);
             vec2 ddxUv = (dUv1 * (s_v2.y - s_v0.y) - dUv2 * (s_v1.y - s_v0.y)) * inv_det;
             vec2 ddyUv = (dUv2 * (s_v1.x - s_v0.x) - dUv1 * (s_v2.x - s_v0.x)) * inv_det;
             imageStore(ima_grads, px, vec4(ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y));
