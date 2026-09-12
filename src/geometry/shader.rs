@@ -1,19 +1,5 @@
 use ethel::shader::{GlslStorage, GlslStruct};
 
-// ethel::shader_glsl_struct! {
-//     struct RenderVertex {
-//         pos_x : f32 => float
-//         pos_y : f32 => float
-//         pos_z : f32 => float
-//         norm_oct_x : f32 => float
-//         norm_oct_y : f32 => float
-//         tan_oct_x : f32 => float
-//         tan_oct_y : f32 => float
-//         uv_x : f32 => float
-//         uv_y : f32 => float
-//     }
-// }
-
 ethel::shader_glsl_struct! {
     struct DomainData {
         idx8_geoid24 : u32 => uint
@@ -27,7 +13,6 @@ ethel::shader_glsl_struct! {
     }
 }
 
-//pub const TYPE_RENDERVERTEX: GlslStruct = RenderVertexGlslStruct::as_definition();
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 
@@ -68,14 +53,27 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 /// This is a compute shader that runs arbitrary logic with the purpose of
 /// gathering, modifying, and submitting geometry organized with `domains`.
 ///
-/// The macro's syntax is similar to [`ethel's compute shaders`].
+/// The first block of the macro is `source`, which must refer to structs
+/// implementing [`HasVertexBuffers`] and [`HasTriangleBuffers`], which
+/// describe the size and length of the buffers.
+/// ```text
+/// source {
+///     vertex => $vb_source:ty;
+///     triangle => $tb_source:ty;
+/// };
+/// ```
+///
+/// [`HasVertexBuffers`]: super::HasVertexBuffers
+/// [`HasTriangleBuffers`]: super::HasTriangleBuffers
+///
+/// The rest of macro's syntax is similar to [`ethel's compute shaders`].
 ///
 /// Optional blocks for additional data can be defined, these are, in order:
 /// `uniform`, `sampler`, `image`, `type`, `ssbo`, `lib`, and `share`.
 /// The definition syntax for each of these is identical to
 /// [`ethel's compute shaders`].
 ///
-/// **NOTE**: Any additional SSBO must begin at index 5, as the first 4 binding indices
+/// **NOTE**: Any additional SSBO must begin at index 4, as the first 3 binding indices
 /// are reserved for geometry data.
 ///
 /// (Also ensure no types are named exactly 'Vertex' or 'Triangle', as these
@@ -155,40 +153,43 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 ///     triangle/vertex itself. If `count > 1` then a span from `(base,base+count)`
 ///     will be allocated.
 /// * **Fill**
-///   * `void VertexData(uint handle, vec3 position, vec2|vec3 normal,
-///      vec2|vec3 tangent, vec2 uv)`:
+///   * `void VertexData{Attribute}(uint handle, vec3|2 data)`:
+///      Fills vertex `Attribute` data for the vertex corresponding to
+///      `handle`. `Attribute` options are `Position`, `Normal`, `Uv`. The
+///      `data` type is `vec3` for `Position`, `vec2` for `Uv`, and can be
+///      either `vec3` or `vec2` for `Normal`, depending on whether it is
+///      already octahedron-encoded or not.
+///   * `void VertexData(uint handle, vec3 position,
+///      vec2|vec3 normal, vec2 uv)`:
 ///      Fills vertex data for the vertex corresponding to `handle` with the
-///      given data. `normal` and `tangent` can be either `vec2`s if
-///      octahedron encoded or `vec3`s if not (if they are given as `vec3`s,
-///      they will be encoded anyways internally).
-///   * `void VertexData(uint base, vec3 positions[], vec2|vec3 normals[]
-///      vec2|vec3 tangents[], vec2 uvs[], uint count)`:
-///      See above. Bulk-fills contiguous vertex data with the given parallel
-///      data arrays.
-///      `count` must be the amount of vertices to fill starting from `base`.
+///      given data. `normal` can be either `vec2`s if octahedron encoded or
+///      `vec3`s if not (if they are given as `vec3`s, they will be encoded
+///      anyways internally).
+///   * `void TriangleDataIndices(uint handle, uint indices[3])`:
+///      Fills the triangle attribs data for the triangle corresponding to
+///      `handle` with the given data.
+///   * `void TriangleDataAttribs(uint handle, uint geom_id)`:
+///      Fills the triangle indices data for the triangle corresponding to
+///      `handle` with the given data.
 ///   * `void TriangleData(uint handle, uint indices[3], uint geom_id)`:
 ///      Fills the triangle data for the triangle corresponding to `handle`
 ///      with the given data.
-///   * `void TriangleData(uint base, uint indices[][3], uint geom_id,
-///      uint count)`:
-///      See above. Bulk-fills contiguous triangle data with the given parallel
-///      data arrays.
-///      `count` must be the amount of triangles to fill starting from `base`.
 ///  * **One-off alloc + fill**
 ///    * `uint Alloc[Vertex|Triangle]Data(DATA data)`:
 ///      allocate and feed a single vertex/triangle with the given `data`,
 ///      returning the index of the allocated vertex/triangle.
 ///      The `DATA data` parameter(s) must correspond to the parameter list
-///      as seen in the entry for `VertexData` or `TriangleData` methods
-///      (non-bulk variants).
+///      as seen in the entry for `VertexData` or `TriangleData` methods.
 ///  * **Getters**
-///   * `RenderVertex GetVertex(uint handle)`:
-///     returns the vertex data corresponding to the given `handle`.
-///   * `uint[3] GetTriangle(uint handle)`:
-///     returns the triangle indexing data corresponding to the given
+///   * `float[N] GetVertex{Attribute}(uint handle)`:
+///     returns the relevant vertex `Attribute` corresponding to the given
+///     vertex `handle`. `Attribute` options are `Position`, `Normal`, `Uv`.
+///     `N` is `3` for `Position` and `2` otherwise.
+///   * `uint[3] GetTriangleIndices(uint handle)`:
+///     returns the triangle indexing data corresponding to the given triangle
 ///     `handle`.
 ///   * `TriangleAttribs GetTriangleAttribs(uint handle)`:
-///     returns the triangle attribute data corresponding to the given
+///     returns the triangle attribute data corresponding to the given triangle
 ///     `handle`.
 ///
 /// [`rendrs_packOctahedron`]: crate::pack::PACK_OCTAHEDRON_ENCODE
@@ -411,7 +412,6 @@ macro_rules! geometry_submission_job {
                             TriangleData(triangle_index, indices, geom_id);
                             return triangle_index;
                         }
-
                         uint AllocVertexData(vec3 p, vec2 n_oct, vec2 t_oct, vec2 uv) {
                             uint vertex_index = AllocVertex();
                             VertexData(vertex_index, p, n_oct, t_oct, uv);

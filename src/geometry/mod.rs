@@ -74,11 +74,6 @@ pub trait HasTriangleBuffers: GpuResource + std::fmt::Debug + 'static {
     fn bind_arrays(&self, index: u32);
 }
 
-crate::geometry_buffers!(
-    vertices = 1000;
-    triangles = 500;
-);
-
 #[macro_export]
 macro_rules! geometry_buffers_impls {
     (
