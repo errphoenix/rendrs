@@ -621,12 +621,15 @@ ethel::shader_glsl_compute! {
             float b_p0[3] = rendrs_vertex_positions[b_tri[0]];
             float b_p1[3] = rendrs_vertex_positions[b_tri[1]];
             float b_p2[3] = rendrs_vertex_positions[b_tri[2]];
+            vec3 p0 = vec3(b_p0[0], b_p0[1], b_p0[2]);
+            vec3 p1 = vec3(b_p1[0], b_p1[1], b_p1[2]);
+            vec3 p2 = vec3(b_p2[0], b_p2[1], b_p2[2]);
 
             mat4 MVP = proj_mat * view_mat;
 
-            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p0[0], b_p0[1], b_p0[2]));
-            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p1[0], b_p1[1], b_p1[2]));
-            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, vec3(b_p2[0], b_p2[1], b_p2[2]));
+            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, p0);
+            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, p1);
+            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, p2);
 
             vec2 px_c = vec2(px) + 0.5;
             float inv_det = 1.0 / ((s_v1.x - s_v0.x) * (s_v2.y - s_v0.y) - (s_v2.x - s_v0.x) * (s_v1.y - s_v0.y));
@@ -634,34 +637,48 @@ ethel::shader_glsl_compute! {
             float B_w = ((s_v1.x - s_v0.x) * (px_c.y - s_v0.y) - (s_v1.y - s_v0.y) * (px_c.x - s_v0.x)) * inv_det;
             float B_u = 1.0 - B_v - B_w;
 
-            float w_p0 = (MVP * vec4(b_p0[0], b_p0[1], b_p0[2], 1.0)).w;
-            float w_p1 = (MVP * vec4(b_p1[0], b_p1[1], b_p1[2], 1.0)).w;
-            float w_p2 = (MVP * vec4(b_p2[0], b_p2[1], b_p2[2], 1.0)).w;
-            float y_0 = B_u / w_p0;
-            float y_1 = B_v / w_p1;
-            float y_2 = B_w / w_p2;
+            float w_p0 = (MVP * vec4(p0, 1.0)).w;
+            float w_p1 = (MVP * vec4(p1, 1.0)).w;
+            float w_p2 = (MVP * vec4(p2, 1.0)).w;
+            float iw0 = 1.0 / w_p0;
+            float iw1 = 1.0 / w_p1;
+            float iw2 = 1.0 / w_p2;
+
+            float y_0 = B_u * iw0;
+            float y_1 = B_v * iw1;
+            float y_2 = B_w * iw2;
             float y_sum = y_0 + y_1 + y_2;
-            B_u = y_0 / y_sum;
-            B_v = y_1 / y_sum;
-            B_w = y_2 / y_sum;
+            float iy_sum = 1.0 / y_sum;
+            B_u = y_0 * iy_sum;
+            B_v = y_1 * iy_sum;
+            B_w = y_2 * iy_sum;
 
             float b_u0[2] = rendrs_vertex_uvs[b_tri[0]];
             float b_u1[2] = rendrs_vertex_uvs[b_tri[1]];
             float b_u2[2] = rendrs_vertex_uvs[b_tri[2]];
 
-            vec3 dP1 = vec3(b_p1[0], b_p1[1], b_p1[2]) - vec3(b_p0[0], b_p0[1], b_p0[2]);
-            vec3 dP2 = vec3(b_p2[0], b_p2[1], b_p2[2]) - vec3(b_p0[0], b_p0[1], b_p0[2]);
-            vec3 ddxP = (dP1 * (s_v2.y - s_v0.y) - dP2 * (s_v1.y - s_v0.y)) * inv_det;
-            vec3 ddyP = (dP2 * (s_v1.x - s_v0.x) - dP1 * (s_v2.x - s_v0.x)) * inv_det;
+            float ddxIw = ((iw1 - iw0) * (s_v2.y - s_v0.y) - (iw2 - iw0) * (s_v1.y - s_v0.y)) * inv_det;
+            float ddyIw = ((iw2 - iw0) * (s_v1.x - s_v0.x) - (iw1 - iw0) * (s_v2.x - s_v0.x)) * inv_det;
 
             float b_n0[2] = rendrs_vertex_normals[b_tri[0]];
             float b_n1[2] = rendrs_vertex_normals[b_tri[1]];
             float b_n2[2] = rendrs_vertex_normals[b_tri[2]];
 
-            vec2 dUv1 = vec2(b_u1[0], b_u1[1]) - vec2(b_u0[0], b_u0[1]);
-            vec2 dUv2 = vec2(b_u2[0], b_u2[1]) - vec2(b_u0[0], b_u0[1]);
-            vec2 ddxUv = (dUv1 * (s_v2.y - s_v0.y) - dUv2 * (s_v1.y - s_v0.y)) * inv_det;
-            vec2 ddyUv = (dUv2 * (s_v1.x - s_v0.x) - dUv1 * (s_v2.x - s_v0.x)) * inv_det;
+            vec2 uv0 = vec2(b_u0[0], b_u0[1]);
+            vec2 uv1 = vec2(b_u1[0], b_u1[1]);
+            vec2 uv2 = vec2(b_u2[0], b_u2[1]);
+
+            vec2 ddxUw = ((uv1 * iw1 - uv0 * iw0) * (s_v2.y - s_v0.y) - (uv2 * iw2 - uv0 * iw0) * (s_v1.y - s_v0.y)) * inv_det;
+            vec2 ddyUw = ((uv2 * iw2 - uv0 * iw0) * (s_v1.x - s_v0.x) - (uv1 * iw1 - uv0 * iw0) * (s_v2.x - s_v0.x)) * inv_det;
+            vec3 ddxPw = ((p1 * iw1 - p0 * iw0) * (s_v2.y - s_v0.y) - (p2 * iw2 - p0 * iw0) * (s_v1.y - s_v0.y)) * inv_det;
+            vec3 ddyPw = ((p2 * iw2 - p0 * iw0) * (s_v1.x - s_v0.x) - (p1 * iw1 - p0 * iw0) * (s_v2.x - s_v0.x)) * inv_det;
+            vec2 uv_p  = uv0 * B_u + uv1 * B_v + uv2 * B_w;
+            vec3 p_p   = p0  * B_u + p1  * B_v + p2  * B_w;
+            vec2 ddxUv = (ddxUw - uv_p * ddxIw) * iy_sum;
+            vec2 ddyUv = (ddyUw - uv_p * ddyIw) * iy_sum;
+            vec3 ddxP  = (ddxPw - p_p  * ddxIw) * iy_sum;
+            vec3 ddyP  = (ddyPw - p_p  * ddyIw) * iy_sum;
+
             imageStore(ima_grads, px, vec4(ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y));
 
             vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
