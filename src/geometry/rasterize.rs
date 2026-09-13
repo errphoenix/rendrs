@@ -758,6 +758,17 @@ pub const LIB_INTERP_ATTRIB: GlslLib = GlslLib::new(
 ///
 /// This is meant to be used to reconstruct interpolated attributes in an
 /// eventual shading (or intermediate) pass.
+///
+/// ## Depth Range
+/// The scalar `depth` value is also used as the NDC's Z component, so it must
+/// be supplied according to the application's depth range convention.
+///
+/// E.g.:
+///
+/// For reverse-z, `depth` can be provided directly as sampled as it is
+/// already within the common reverse-z range (0,1). For standard depth
+/// convention where the range is (-1,1), `depth` must be normalized to that
+/// range.
 pub const LIB_DEPTH_WORLDPOS: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_DepthWorldPosition[
         s_depth     : float,
