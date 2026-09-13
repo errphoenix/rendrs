@@ -1,4 +1,7 @@
-use ethel::{render::buffer::SingleBuffer, shader::GlslLib};
+use ethel::{
+    render::buffer::SingleBuffer,
+    shader::{GlslLib, GlslStruct},
+};
 
 pub mod brdf_bake_specular;
 pub mod image_blit;
@@ -492,6 +495,8 @@ ethel::shader_glsl_struct! {
     }
 }
 
+pub const TYPE_FRESNEL_PARAMS: GlslStruct = FresnelParamsGlslStruct::as_definition();
+
 /// Evaluate Fresnel-Schlick parameters.
 ///
 /// Creates the `rendrs_FresnelParams` function, which has the following arguments:
@@ -544,5 +549,65 @@ pub const LIB_FRESNEL_SCHLICK: GlslLib = ethel::shader_glsl_lib! {
         float iNdotL5 = iNdotL*iNdotL*iNdotL*iNdotL*iNdotL;
         vec3 f = (1.0 - fresnel) * iNdotL5;
         return fresnel + f;
+    "
+};
+
+/// Cotangent derivation from world-pos and uv map coordinate.
+///
+/// Generates the `rendrs_deriveCotangent` function, taking in an `n: vec3`
+/// normal vector, a `pos: vec3` world position vector, and `uv: vec` uv map
+/// coordinate vector.
+///
+/// Returns a `mat3` TBN matrix.
+///
+/// This function requires GLSL's built-in derivative functions, which are only
+/// available in the fragment/pixel shader.
+pub const UTIL_DERIVE_COTANGENT: GlslLib = ethel::shader_glsl_lib! {
+    mat3 rendrs_deriveCotangent [
+        n   : vec3,
+        pos : vec3,
+        uv  : vec2
+    ] => "
+        vec3 dp1 = dFdx(pos);
+        vec3 dp2 = dFdy(pos);
+        vec2 duv1 = dFdx(uv);
+        vec2 duv2 = dFdy(uv);
+        vec3 dp2perp = cross(dp2, n);
+        vec3 dp1perp = cross(n, dp1);
+        vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+        vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+        float im = inversesqrt(max(dot(T, T), dot(B, B)));
+        //todo: orthonormalize?
+        return mat3(T * im, B * im, n);
+    "
+};
+
+/// Cotangent derivation from world-pos and uv map coordinates with explicit
+/// gradient values.
+///
+/// Generates the `rendrs_deriveCotangentGrad` function, taking in the
+/// following parameters:
+/// * a normal 3d unit vector, from which the cotangent is derived
+/// * the 3d vector describing world-position derivatives in respect to x
+/// * the 3d vector describing world-position derivatives in respect to y
+/// * the 2d vector describing uv derivatives in respect to x
+/// * the 2d vector describing uv derivatives in respect to y
+///
+/// Returns a `mat3` TBN matrix.
+pub const UTIL_DERIVE_COTANGENT_GRAD: GlslLib = ethel::shader_glsl_lib! {
+    mat3 rendrs_deriveCotangentGrad [
+        n    : vec3,
+        dp1  : vec3,
+        dp2  : vec3,
+        duv1 : vec2,
+        duv2 : vec2
+    ] => "
+        vec3 dp2perp = cross(dp2, n);
+        vec3 dp1perp = cross(n, dp1);
+        vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+        vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+        float im = inversesqrt(max(dot(T, T), dot(B, B)));
+        //todo: orthonormalize?
+        return mat3(T * im, B * im, n);
     "
 };

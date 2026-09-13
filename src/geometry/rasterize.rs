@@ -14,7 +14,7 @@ use janus::{
 use crate::{
     ComputePass, DrawPass,
     geometry::{GeometryBank, HasTriangleBuffers, HasVertexBuffers},
-    graphics::PixelResolution,
+    graphics::{PixelResolution, UTIL_DERIVE_COTANGENT_GRAD},
     pack::{PACK_OCTAHEDRON_DECODE, PACK_OCTAHEDRON_ENCODE, PACK_OCTAHEDRON_WRAP_UTIL},
     pipeline::{
         CtxType, ImageAccessKind, ImageObject, ImageObjectTarget, OutputObject, Pass, RenderPool,
@@ -598,6 +598,7 @@ ethel::shader_glsl_compute! {
             PACK_OCTAHEDRON_WRAP_UTIL;
             PACK_OCTAHEDRON_ENCODE;
             PACK_OCTAHEDRON_DECODE;
+            UTIL_DERIVE_COTANGENT_GRAD;
             INTERNAL_UTIL_ATTR_INTERP_PROJECT_TO_SCREEN;
         };
 
@@ -620,12 +621,6 @@ ethel::shader_glsl_compute! {
             float b_p0[3] = rendrs_vertex_positions[b_tri[0]];
             float b_p1[3] = rendrs_vertex_positions[b_tri[1]];
             float b_p2[3] = rendrs_vertex_positions[b_tri[2]];
-            float b_n0[2] = rendrs_vertex_normals[b_tri[0]];
-            float b_n1[2] = rendrs_vertex_normals[b_tri[1]];
-            float b_n2[2] = rendrs_vertex_normals[b_tri[2]];
-            float b_u0[2] = rendrs_vertex_uvs[b_tri[0]];
-            float b_u1[2] = rendrs_vertex_uvs[b_tri[1]];
-            float b_u2[2] = rendrs_vertex_uvs[b_tri[2]];
 
             mat4 MVP = proj_mat * view_mat;
 
@@ -650,18 +645,33 @@ ethel::shader_glsl_compute! {
             B_v = y_1 / y_sum;
             B_w = y_2 / y_sum;
 
-            vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
-            vec3 b_n1d = rendrs_unpackOctahedron(vec2(b_n1[0], b_n1[1]));
-            vec3 b_n2d = rendrs_unpackOctahedron(vec2(b_n2[0], b_n2[1]));
-            vec3 N  = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
-            vec2 Ne = rendrs_packOctahedron(N) * 0.5 + 0.5; //unorm16
-            imageStore(ima_space, px, vec4(Ne.x, Ne.y, B_u, B_v));
+            float b_u0[2] = rendrs_vertex_uvs[b_tri[0]];
+            float b_u1[2] = rendrs_vertex_uvs[b_tri[1]];
+            float b_u2[2] = rendrs_vertex_uvs[b_tri[2]];
+
+            vec3 dP1 = vec3(b_p1[0], b_p1[1], b_p1[2]) - vec3(b_p0[0], b_p0[1], b_p0[2]);
+            vec3 dP2 = vec3(b_p2[0], b_p2[1], b_p2[2]) - vec3(b_p0[0], b_p0[1], b_p0[2]);
+            vec3 ddxP = (dP1 * (s_v2.y - s_v0.y) - dP2 * (s_v1.y - s_v0.y)) * inv_det;
+            vec3 ddyP = (dP2 * (s_v1.x - s_v0.x) - dP1 * (s_v2.x - s_v0.x)) * inv_det;
+
+            float b_n0[2] = rendrs_vertex_normals[b_tri[0]];
+            float b_n1[2] = rendrs_vertex_normals[b_tri[1]];
+            float b_n2[2] = rendrs_vertex_normals[b_tri[2]];
 
             vec2 dUv1 = vec2(b_u1[0], b_u1[1]) - vec2(b_u0[0], b_u0[1]);
             vec2 dUv2 = vec2(b_u2[0], b_u2[1]) - vec2(b_u0[0], b_u0[1]);
             vec2 ddxUv = (dUv1 * (s_v2.y - s_v0.y) - dUv2 * (s_v1.y - s_v0.y)) * inv_det;
             vec2 ddyUv = (dUv2 * (s_v1.x - s_v0.x) - dUv1 * (s_v2.x - s_v0.x)) * inv_det;
             imageStore(ima_grads, px, vec4(ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y));
+
+            vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
+            vec3 b_n1d = rendrs_unpackOctahedron(vec2(b_n1[0], b_n1[1]));
+            vec3 b_n2d = rendrs_unpackOctahedron(vec2(b_n2[0], b_n2[1]));
+            vec3 N  = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
+            mat3 TBN = rendrs_deriveCotangentGrad(N, ddxP, ddyP, ddxUv, ddyUv);
+            vec3 T   = TBN[0];
+            vec2 Te = rendrs_packOctahedron(T) * 0.5 + 0.5; //unorm16
+            imageStore(ima_space, px, vec4(Te.x, Te.y, B_u, B_v));
             ";
         }
     }
@@ -691,28 +701,28 @@ pub const LIB_UTIL_FRAMESPACE_GET_BWEIGHTS: GlslLib = ethel::shader_glsl_lib! {
     "
 };
 
-/// Helper function to extract the normal from the `frame/space`
+/// Helper function to extract the tangent-framre from the `frame/space`
 /// image target produced by the deferred attribute interpolation pass.
 ///
-/// Creates the `rendrs_FrameSpace_GetNormal` function, which takes the
+/// Creates the `rendrs_FrameSpace_GetTanFrame` function, which takes the
 /// `vec4` sample fetched from the relevant image target, which is the
 /// 'framespace'.
 ///
 /// The function will retrieve the `RG` components of the sample,
 /// which correspond to *normalized* octahedron-encoded coordinates of the
-/// normal.
-/// From there, the normal is reconstructed to a 3d vector and returned.
+/// vector.
+/// From there, the tangent is reconstructed to a 3d vector and returned.
 ///
 /// Requires [`rendrs_unpackOctahedron`](crate::pack::PACK_OCTAHEDRON_DECODE).
 ///
 /// This is meant to be used to reconstruct interpolated attributes in an
 /// eventual shading (or intermediate) pass.
-pub const LIB_UTIL_FRAMESPACE_GET_NORMAL: GlslLib = ethel::shader_glsl_lib! {
-    vec3 rendrs_FrameSpace_GetNormal[
+pub const LIB_UTIL_FRAMESPACE_GET_TANFRAME: GlslLib = ethel::shader_glsl_lib! {
+    vec3 rendrs_FrameSpace_GetTanFrame[
         vS_framespace : vec4
     ] => "
-        vec2 N_oct = vS_framespace.rg * 2.0 - 1.0;
-        return rendrs_unpackOctahedron(N_oct);
+        vec2 T_oct = vS_framespace.rg * 2.0 - 1.0;
+        return rendrs_unpackOctahedron(T_oct);
     "
 };
 
@@ -769,7 +779,7 @@ pub const LIB_INTERP_ATTRIB: GlslLib = GlslLib::new(
 /// already within the common reverse-z range (0,1). For standard depth
 /// convention where the range is (-1,1), `depth` must be normalized to that
 /// range.
-pub const LIB_DEPTH_WORLDPOS: GlslLib = ethel::shader_glsl_lib! {
+pub const LIB_UTIL_DEPTH_WORLDPOS: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_DepthWorldPosition[
         s_depth     : float,
         v_uv_screen : vec2,
