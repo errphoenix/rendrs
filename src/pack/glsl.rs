@@ -7,7 +7,7 @@ use ethel::shader::GlslLib;
 pub const PACK_OCTAHEDRON_WRAP_UTIL: GlslLib = ethel::shader_glsl_lib! {
     vec2 rendrs_wrapOctahedron [ v : vec2 ] => "
         return
-            (1.0 - abs(v.xy)) * vec2(
+            (1.0 - abs(v.yx)) * vec2(
                 v.x >= 0.0 ? 1.0 : - 1.0,
                 v.y >= 0.0 ? 1.0 : - 1.0
             )
@@ -40,7 +40,7 @@ pub const PACK_OCTAHEDRON_DECODE: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_unpackOctahedron [ f : vec2 ] => "
         f = f * 2.0 - 1.0;
         vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
-        float t = clamp(-n.x, 0.0, 1.0);
+        float t = clamp(-n.z, 0.0, 1.0);
         n.xy += vec2(
             n.x >= 0.0 ? -t : t,
             n.y >= 0.0 ? -t : t
