@@ -666,7 +666,7 @@ ethel::shader_glsl_compute! {
             vec3 N  = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
             mat3 TBN = rendrs_deriveCotangentGrad(N, ddxP, ddyP, ddxUv, ddyUv);
             vec3 T   = TBN[0];
-            vec2 Te = rendrs_packOctahedron(T) * 0.5 + 0.5; //unorm16
+            vec2 Te = rendrs_packOctahedron(T); //unorm16
             imageStore(ima_space, px, vec4(Te.x, Te.y, B_u, B_v));
             ";
         }
@@ -717,7 +717,7 @@ pub const LIB_UTIL_FRAMESPACE_GET_TANFRAME: GlslLib = ethel::shader_glsl_lib! {
     vec3 rendrs_FrameSpace_GetTanFrame[
         vS_framespace : vec4
     ] => "
-        vec2 T_oct = vS_framespace.rg * 2.0 - 1.0;
+        vec2 T_oct = vS_framespace.rg;
         return rendrs_unpackOctahedron(T_oct);
     "
 };
