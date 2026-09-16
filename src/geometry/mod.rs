@@ -3,9 +3,8 @@ use ethel::render::buffer::SingleBuffer;
 pub use dispatch::GeomPass;
 use janus::GpuResource;
 pub use rasterize::{
-    AttribInterpolationPass, GeomRasterizePass, barrier_geom_attrib_interp, barrier_geom_compose,
-    barrier_geom_rasterize, geom_attribs_framespace_target, geom_attribs_gradients_target,
-    geom_rasterize_target,
+    AttribInterpolationPass, GeomRasterizePass, geom_attribs_framespace_target,
+    geom_attribs_gradients_target, geom_rasterize_target,
 };
 pub use shader::{
     SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_TRIANGLE,

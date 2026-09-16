@@ -22,27 +22,6 @@ use crate::{
     },
 };
 
-/// Issues a `shader_storage` and `atomic_counter` memory barrier.
-pub fn barrier_geom_compose() {
-    unsafe {
-        janus::gl::MemoryBarrier(
-            janus::gl::SHADER_STORAGE_BARRIER_BIT
-                | janus::gl::ATOMIC_COUNTER_BARRIER_BIT
-                | janus::gl::ELEMENT_ARRAY_BARRIER_BIT,
-        );
-    }
-}
-
-/// Issues a `framebuffer` memory barrier.
-pub fn barrier_geom_rasterize() {
-    janus::gl::barrier_framebuffers();
-}
-
-/// Issues a `shader image` memory barrier.
-pub fn barrier_geom_attrib_interp() {
-    janus::gl::barrier_shader_image();
-}
-
 /// Returns an `RG32UI` [`RenderTarget`] for the geometry rasterization pass
 /// color output.
 pub fn geom_rasterize_target(
