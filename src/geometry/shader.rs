@@ -13,6 +13,33 @@ ethel::shader_glsl_struct! {
     }
 }
 
+ethel::shader_glsl_struct! {
+    struct InstanceList {
+        geometry_id : u32 => uint
+
+        tri_base  : u32 => uint
+        tri_count : u32 => uint
+
+        // 0xffff0000 - instance base
+        // 0x0000ffff - instance count
+        instance_base_count : u32 => uint
+    }
+}
+
+ethel::shader_glsl_struct! {
+    struct InstanceTransform {
+        px : f32 => float
+        py : f32 => float
+        pz : f32 => float
+
+        qx : f32 => float
+        qy : f32 => float
+        qz : f32 => float
+        qw : f32 => float
+
+        s  : f32 => float
+    }
+}
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 
@@ -29,22 +56,35 @@ macro_rules! ssbo_binding {
     (Rendrs_Domains) => {
         3
     };
+    (Rendrs_GBANK_InstanceData) => {
+        4
+    };
 }
 
 pub const SSBO_BINDING_GBANK_VERTEX: u32 = ssbo_binding!(Rendrs_GBANK_VertexBuffers);
 pub const SSBO_BINDING_GBANK_TRIANGLE: u32 = ssbo_binding!(Rendrs_GBANK_TriangleBuffers);
 pub const SSBO_BINDING_GBANK_GCOUNTER: u32 = ssbo_binding!(Rendrs_GBANK_GCounter);
 pub const SSBO_BINDING_DOMAINS: u32 = ssbo_binding!(Rendrs_Domains);
+pub const SSBO_BINDING_GBANK_INSTANCE_DATA: u32 = ssbo_binding!(Rendrs_GBANK_InstanceData);
 
 pub const SSBO_GBANK_GCOUNTER: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_GCounter => {
         uint : rendrs_gbank_gcounter_vertex;
         uint : rendrs_gbank_gcounter_triangle;
+        uint : rendrs_gbank_gcounter_instancelist;
+        uint : rendrs_gbank_gcounter_instance;
     }
 };
 pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_Domains => {
         [dyn_array DomainData : rendrs_domains]
+    }
+};
+
+pub const SSBO_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
+    buf Rendrs_GBANK_InstanceData => {
+        InstanceTransform : rendrs_gbank_instance_transforms[65535];
+        InstanceList      : rendrs_gbank_instance_lists[1024];
     }
 };
 
@@ -73,7 +113,7 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 /// The definition syntax for each of these is identical to
 /// [`ethel's compute shaders`].
 ///
-/// **NOTE**: Any additional SSBO must begin at index 4, as the first 3 binding indices
+/// **NOTE**: Any additional SSBO must begin at index 5, as the first 3 binding indices
 /// are reserved for geometry data.
 ///
 /// (Also ensure no types are named exactly 'Vertex' or 'Triangle', as these

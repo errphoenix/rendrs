@@ -204,15 +204,21 @@ macro_rules! geometry_buffers {
     };
 }
 
+const GCOUNTER_COUNT: usize = 4;
+
 /// Atomic counters buffer.
 ///
 /// Index 0 = vertex counter
 ///
 /// Index 1 = triangle counter
-pub type GCounterBuffer = SingleBuffer<[u32; 2]>;
+///
+/// Index 2 = instance lists counter
+///
+/// Index 3 = instances counter
+pub type GCounterBuffer = SingleBuffer<[u32; GCOUNTER_COUNT]>;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GeoCounters(u32, u32);
+pub struct GeoCounters(u32, u32, u32, u32);
 impl GeoCounters {
     pub const fn vertices(self) -> u32 {
         self.0
@@ -221,6 +227,47 @@ impl GeoCounters {
     pub const fn triangles(self) -> u32 {
         self.1
     }
+
+    pub const fn instance_lists(self) -> u32 {
+        self.2
+    }
+
+    pub const fn instances(self) -> u32 {
+        self.3
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct InstanceList {
+    pub geometry_id: u32,
+
+    pub tri_base: u32,
+    pub tri_count: u32,
+
+    /// packed as uint on gpu
+    pub instance_base_count: (u16, u16),
+}
+
+// #[repr(C)]
+// #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
+// pub struct InstanceAttribs {
+//     //todo
+// }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+pub struct InstanceTransform {
+    pub px: f32,
+    pub py: f32,
+    pub pz: f32,
+
+    pub qx: f32,
+    pub qy: f32,
+    pub qz: f32,
+    pub qw: f32,
+
+    pub s: f32,
 }
 
 #[derive(Debug, Default)]
@@ -263,7 +310,12 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
         let mut dst = GeoCounters::default();
         let dst_ptr = (&raw mut dst).cast();
         unsafe {
-            janus::gl::GetNamedBufferSubData(gcounter_buf, 0, 8, dst_ptr);
+            janus::gl::GetNamedBufferSubData(
+                gcounter_buf,
+                0,
+                (size_of::<u32>() * GCOUNTER_COUNT) as isize,
+                dst_ptr,
+            );
         }
         dst
     }
