@@ -42,6 +42,8 @@ ethel::shader_glsl_struct! {
 }
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
+pub const TYPE_INSTANCELIST: GlslStruct = InstanceListGlslStruct::as_definition();
+pub const TYPE_INSTANCE_TRANSFORM: GlslStruct = InstanceTransformGlslStruct::as_definition();
 
 macro_rules! ssbo_binding {
     (Rendrs_GBANK_VertexBuffers) => {
@@ -311,6 +313,8 @@ macro_rules! geometry_submission_job {
                 type {
                     $crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
                     $crate::geometry::shader::TYPE_DOMAIN_DATA
+                    $crate::geometry::shader::TYPE_INSTANCELIST
+                    $crate::geometry::shader::TYPE_INSTANCE_TRANSFORM
 
                     $($($type_glsl)+)?
                 };
@@ -319,6 +323,7 @@ macro_rules! geometry_submission_job {
                     SSBO_GBANK_TRIANGLE
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
                     $crate::geometry::shader::SSBO_DOMAINS
+                    $crate::geometry::shader::SSBO_INSTANCING_DATA
 
                     $($($ssbo_glsl)+)?
                 };
@@ -448,6 +453,85 @@ macro_rules! geometry_submission_job {
                             vec2 n_oct = rendrs_packOctahedron(n);
                             return AllocVertexData(p, n_oct, uv);
                         }
+                        "
+                    });
+
+                    // instance functions
+                    ethel::shader::GlslLib::new(indoc::indoc! {
+                        "
+                        // alloc 1, return (list)
+                        uint AllocInstanceList() {
+                            return atomicAdd(rendrs_gbank_gcounter_instancelist, 1);
+                        }
+                        // alloc N, return base (instances)
+                        uint AllocInstances(uint count) {
+                            return atomicAdd(rendrs_gbank_gcounter_instance, count);
+                        }
+
+                        void InstanceDataTransform(uint index, vec3 position, vec4 quaternion, float scale) {
+                            rendrs_gbank_instance_transforms[index] = InstanceTransform(
+                                position.x, position.y, position.z,
+
+                                quaternion.x, quaternion.y,
+                                quaternion.z, quaternion.w,
+
+                                scale
+                            );
+                        }
+                        void InstanceDataTransform(uint index, vec3 position, vec4 quaternion) {
+                            InstanceDataTransform(index, position, quaternion, 1.0);
+                        }
+                        void InstanceDataTransform(uint index, vec3 position) {
+                            InstanceDataTransform(index, position, vec4(vec3(0.0), 1.0), 1.0);
+                        }
+
+                        void InstanceListDataGeometry(uint index, uint geo_id, uint tri_base, uint tri_count) {
+                            InstanceList list = rendrs_gbank_instance_lists[index];
+                            list.geometry_id = geo_id;
+                            list.tri_base = tri_base;
+                            list.tri_count = tri_count;
+                            rendrs_gbank_instance_lists[index] = list;
+                        }
+                        void InstanceListDataInstance(uint index, uint instance_base, uint instance_count) {
+                            InstanceList list = rendrs_gbank_instance_lists[index];
+                            uint m = instance_base << 16;
+                            uint l = instance_count & 0xffff;
+                            list.instance_base_count = l | m;
+                            rendrs_gbank_instance_lists[index] = list;
+                        }
+                        void InstanceListData(
+                            uint index, uint geo_id,
+                            uint tri_base, uint tri_count,
+                            uint instance_base, uint instance_count
+                        ) {
+                            uint im = instance_base << 16;
+                            uint il = instance_count & 0xffff;
+                            rendrs_gbank_instance_lists[index] = InstanceList(
+                              geo_id, tri_base, tri_count, il | im
+                            );
+                        }
+
+                        uint SubmitInstancing(
+                            uint geo_id,
+                            uint tri_base, uint tri_count,
+                            uint instance_base, uint instance_count
+                        ) {
+                            uint index = AllocInstanceList();
+                            uint im = instance_base << 16;
+                            uint il = instance_count & 0xffff;
+                            rendrs_gbank_instance_lists[index] = InstanceList(
+                              geo_id, tri_base, tri_count, il | im
+                            );
+                            return index;
+                        }
+
+                        InstanceList GetInstanceList(uint index) {
+                            return rendrs_gbank_instance_lists[index];
+                        }
+                        InstanceTransform GetInstanceTransform(uint index) {
+                            return rendrs_gbank_instance_transforms[index];
+                        }
+
                         "
                     });
 
