@@ -234,6 +234,47 @@ pub const SSBO_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
 ///     returns the triangle attribute data corresponding to the given triangle
 ///     `handle`.
 ///
+/// ### Instancing
+/// Geometry submission also supports submission of instanced meshes, through
+/// the following functions:
+/// * `uint AllocInstanceList(optional uint count)`:
+///   allocates one instance list or a sequence on the global counter and
+///   returns its starting index in the global instance lists array.
+/// * `uint AllocInstances(uint count)`:
+///   allocates one or a sequence of length `count` vertices/triangles to the
+///   global counter and returns the base handle.
+///   The functions allocates a span from `base` to `base + count`.
+/// * `void InstanceDataTransform(uint index, vec3 position,
+///     optional vec4 quaternion, optional float scale)`:
+///   Fills instance data for the given `index` with `position`, `rotation`
+///   (as a `vec4` quaternion) and a uniform `scale` factor. The last 2
+///   parameters are optional, and will default to identities if absent.
+/// * `void InstanceListDataGeometry(uint index, uint geometry_id,
+///     uint triangle_base, uint triangle_count)`:
+///   Fills instance list data for the given `index` with the instanced mesh's
+///   `triangle_base` index in the global triangle arrays as well as its
+///   `triangle_count`. A `geometry_id` to identify the mesh (or instance) is
+///   also required.
+/// * `void InstanceListDataBounds(uint index,
+///     uint instance_base, uint instance_count)`:
+///   Fills instance list data for the given `index` with the base instance
+///   index `instance_base` in the global instances array as well as its
+///   total `instance_count`.
+/// * `void InstanceListData(uint index, uint geo_id,
+///     uint triangle_base, uint triangle_count,
+///     uint instance_base, uint instance_count)`:
+///   Fills all required instance list data for the given `index` in a
+///   single operation. This is more efficient than two separate
+///   `*DataGeometry` and `*DataBounds` calls and should be preferred when
+///   possible.
+/// * `uint AllocInstanceListData(uint geo_id,
+///     uint triangle_base, uint triangle_count,
+///     uint instance_base, uint instance_count)`:
+///   Allocate and fill instance list data. Returns the instance list index.
+/// * `InstanceTransform GetInstanceTransform(uint index)` and
+///    `InstanceList GetInstanceList(uint index)`:
+///   Getters for instance transform and instance list.
+///
 /// [`rendrs_packOctahedron`]: crate::pack::PACK_OCTAHEDRON_ENCODE
 /// [`rendrs_unpackOctahedron`]: crate::pack::PACK_OCTAHEDRON_DECODE
 /// [`rendrs_packSpherical`]: crate::pack::PACK_SPHERICAL_ENCODE
@@ -463,6 +504,10 @@ macro_rules! geometry_submission_job {
                         uint AllocInstanceList() {
                             return atomicAdd(rendrs_gbank_gcounter_instancelist, 1);
                         }
+                        // alloc N, return base (list)
+                        uint AllocInstanceList(uint count) {
+                            return atomicAdd(rendrs_gbank_gcounter_instancelist, count);
+                        }
                         // alloc N, return base (instances)
                         uint AllocInstances(uint count) {
                             return atomicAdd(rendrs_gbank_gcounter_instance, count);
@@ -492,7 +537,7 @@ macro_rules! geometry_submission_job {
                             list.tri_count = tri_count;
                             rendrs_gbank_instance_lists[index] = list;
                         }
-                        void InstanceListDataInstance(uint index, uint instance_base, uint instance_count) {
+                        void InstanceListDataBounds(uint index, uint instance_base, uint instance_count) {
                             InstanceList list = rendrs_gbank_instance_lists[index];
                             uint m = instance_base << 16;
                             uint l = instance_count & 0xffff;
@@ -511,7 +556,7 @@ macro_rules! geometry_submission_job {
                             );
                         }
 
-                        uint SubmitInstancing(
+                        uint AllocInstanceListData(
                             uint geo_id,
                             uint tri_base, uint tri_count,
                             uint instance_base, uint instance_count
