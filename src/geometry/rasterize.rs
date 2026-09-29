@@ -229,11 +229,12 @@ macro_rules! ssbo_binding {
     (rendrs_Geom_Rasterize_VertexUvs) => {
         3
     };
+    // 4 reserved for instancing data
     (rendrs_Geom_Rasterize_TriangleIndices) => {
-        4
+        5
     };
     (rendrs_Geom_Rasterize_TriangleAttribs) => {
-        5
+        6
     };
     (rendrs_Geom_Rasterize_CpyOptsOut) => {
         10
@@ -250,34 +251,75 @@ pub const G_RASTER_SSBO_BIND_TRIANGLE_INDICES: u32 =
 pub const G_RASTER_SSBO_BIND_TRIANGLE_ATTRIBS: u32 =
     ssbo_binding!(rendrs_Geom_Rasterize_TriangleAttribs);
 pub const G_RASTER_SSBO_BIND_CPYOPTS: u32 = ssbo_binding!(rendrs_Geom_Rasterize_CpyOptsOut);
+pub const G_RASTER_SSBO_BIND_INSTANCE_DATA: u32 = super::SSBO_BINDING_GBANK_INSTANCE_DATA;
+
+use crate::graphics::LIB_QUATERNION_MUL;
+use crate::graphics::LIB_QUATERNION_MUL_VEC;
+use ShaderGeomRasterizeVariants::*;
 
 ethel::shader_glsl! {
     struct GeomRasterize > [460] {
-        common {};
+        common {
+            variants {
+                Batched;
+                Instanced;
+            };
+        };
 
-        //todo
         unit ShaderKind::Vertex => [
             uniform {
                 length 1, proj_mat : mat4 => [f32; 16];
                 length 1, view_mat : mat4 => [f32; 16];
+
+                length 1, instance_command_offset : uint => u32;
+            };
+            type {
+                super::TYPE_INSTANCELIST
             };
             ssbo {
-                // gbank ssbos stored with runtime arrays as we are not
+                // gbank ssbos bound using runtime arrays as we are not
                 // concerned  with the number of ssbo bindings here
                 ethel::shader_glsl_ssbo! {
                     buf rendrs_Geom_Rasterize_VertexPositions => {
                         [dyn_array float : rendrs_vertex_positions => each 3]
                     }
                 }
+                super::SSBO_INSTANCING_DATA
+            };
+            lib {
+                GlslLib::new("");
+                >Instanced => LIB_QUATERNION_MUL;
+                >Instanced => LIB_QUATERNION_MUL_VEC;
             };
 
             src() {
                 "
                 float position[] = rendrs_vertex_positions[gl_VertexID];
-
                 vec3 P_model = vec3(position[0], position[1], position[2]);
-                vec4 P_world = proj_mat * view_mat * vec4(P_model, 1.0);
+                vec4 P_world = vec4(P_model, 1.0);
+                ";
+                match {
+                    Instanced => {
+                        "
+                        uint draw_id    = gl_DrawID - instance_command_offset;
+                        InstanceList il = rendrs_gbank_instance_lists[draw_id];
 
+                        uint instance_base = il.instance_base_count >> 16;
+                        uint instance_id   = gl_InstanceID + instance_base;
+
+                        InstanceTransform transform = rendrs_gbank_instance_transforms[instance_id];
+                        float scaling = transform.s;
+                        vec4 rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
+                        vec3 position = vec3(transform.px, transform.py, transform.pz);
+
+                        P_world.xyz *= scaling;
+                        P_world.xyz  = rendrs_QuaternionMul(P_world.xyz, rotation);
+                        P_world.xyz += position;
+                        ";
+                    };
+                }
+                "
+                P_world = proj_mat * view_mat * P_world;
                 gl_Position = P_world;
                 ";
             }
@@ -294,7 +336,7 @@ ethel::shader_glsl! {
                 crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
             };
             ssbo {
-                // gbank ssbos stored with runtime arrays as we are not
+                // gbank ssbos bound using runtime arrays as we are not
                 // concerned  with the number of ssbo bindings here
                 ethel::shader_glsl_ssbo! {
                     buf rendrs_Geom_Rasterize_TriangleAttribs => {
@@ -307,7 +349,7 @@ ethel::shader_glsl! {
                 "
                 TriangleAttribs tri_attribs = rendrs_triangle_attribs[gl_PrimitiveID];
 
-                //todo: more metadata in g channel (tri-atts), bit-packing
+                //todo: more metadata in g channel (tri-attrs), bit-packing
                 uint R = gl_PrimitiveID + 1;
                 uint G = tri_attribs.geometry_id;
 

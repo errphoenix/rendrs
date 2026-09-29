@@ -25,7 +25,6 @@ ethel::shader_glsl_struct! {
         instance_base_count : u32 => uint
     }
 }
-
 ethel::shader_glsl_struct! {
     struct InstanceTransform {
         px : f32 => float
@@ -40,6 +39,7 @@ ethel::shader_glsl_struct! {
         s  : f32 => float
     }
 }
+
 pub const TYPE_DOMAIN_DATA: GlslStruct = DomainDataGlslStruct::as_definition();
 pub const TYPE_TRIANGLE_ATTRIBS: GlslStruct = TriangleAttribsGlslStruct::as_definition();
 pub const TYPE_INSTANCELIST: GlslStruct = InstanceListGlslStruct::as_definition();
