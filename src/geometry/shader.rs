@@ -83,7 +83,7 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
     }
 };
 
-pub const SSBO_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
+pub const SSBO_GBANK_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_InstanceData => {
         InstanceTransform : rendrs_gbank_instance_transforms[65535];
         InstanceList      : rendrs_gbank_instance_lists[1024];
@@ -365,8 +365,8 @@ macro_rules! geometry_submission_job {
                     SSBO_GBANK_VERTEX
                     SSBO_GBANK_TRIANGLE
                     $crate::geometry::shader::SSBO_GBANK_GCOUNTER
+                    $crate::geometry::shader::SSBO_GBANK_INSTANCING_DATA
                     $crate::geometry::shader::SSBO_DOMAINS
-                    $crate::geometry::shader::SSBO_INSTANCING_DATA
 
                     $($($ssbo_glsl)+)?
                 };

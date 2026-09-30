@@ -9,7 +9,7 @@ pub use rasterize::{
 pub use shader::{
     SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_INSTANCE_DATA,
     SSBO_BINDING_GBANK_TRIANGLE, SSBO_BINDING_GBANK_VERTEX, SSBO_DOMAINS, SSBO_GBANK_GCOUNTER,
-    SSBO_INSTANCING_DATA, TYPE_DOMAIN_DATA, TYPE_INSTANCE_TRANSFORM, TYPE_INSTANCELIST,
+    SSBO_GBANK_INSTANCING_DATA, TYPE_DOMAIN_DATA, TYPE_INSTANCE_TRANSFORM, TYPE_INSTANCELIST,
     TYPE_TRIANGLE_ATTRIBS,
 };
 
@@ -26,6 +26,9 @@ pub const DOMAIN_MAX_GEOID: u32 = DOMAIN_GEOID_BITMASK;
 /// Max amount of domains submitted in a single geometry dispatch.
 pub const MAX_DOMAIN_COUNT: u32 = 131_070;
 pub const DOMAIN_SIZE: u32 = 64;
+
+pub const MAX_INSTANCELIST_COUNT: u32 = 1024;
+pub const MAX_INSTANCES_GLOBAL_COUNT: u32 = 65535;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -272,11 +275,40 @@ pub struct InstanceTransform {
     pub s: f32,
 }
 
+ethel::typed_part_buffer! {
+    const InstancingData : 2, {
+        enum Lists: MAX_INSTANCELIST_COUNT as usize => {
+            type InstanceList;
+            bind 0;
+        };
+        enum Transforms: MAX_INSTANCES_GLOBAL_COUNT as usize => {
+            type InstanceTransform;
+            bind 1;
+        };
+    }
+}
+
+pub type InstancingBuffers = InstancingDataPartitionedBuffer;
+impl InstancingBuffers {
+    pub fn bind_lists(&self, index: u32) {
+        self.bind_ssbo_lists(Some(index));
+    }
+
+    pub fn bind_transforms(&self, index: u32) {
+        self.bind_ssbo_transforms(Some(index));
+    }
+
+    pub fn bind_arrays(&self, index: u32) {
+        self.bind_ssbo_arrays(Some(index));
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct GeometryBank<V: HasVertexBuffers, T: HasTriangleBuffers> {
     vertex: V,
     triangle: T,
     gcounter: GCounterBuffer,
+    instancing: InstancingBuffers,
 }
 impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
     pub fn new() -> Self {
@@ -284,15 +316,24 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
             vertex: V::new(),
             triangle: T::new(),
             gcounter: SingleBuffer::zeroed(1),
+            instancing: InstancingBuffers::new(),
         }
     }
 
-    pub const fn vertex_cap(&self) -> usize {
+    pub const fn vertex_cap() -> usize {
         V::CAP
     }
 
-    pub const fn triangle_cap(&self) -> usize {
+    pub const fn triangle_cap() -> usize {
         T::CAP
+    }
+
+    pub const fn instance_lists_cap() -> usize {
+        MAX_INSTANCELIST_COUNT as usize
+    }
+
+    pub const fn instances_cap() -> usize {
+        MAX_INSTANCES_GLOBAL_COUNT as usize
     }
 
     pub const fn vertex_buffers(&self) -> &V {
@@ -305,6 +346,10 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
 
     pub const fn gcounter_buffer(&self) -> &GCounterBuffer {
         &self.gcounter
+    }
+
+    pub const fn instancing_buffers(&self) -> &InstancingBuffers {
+        &self.instancing
     }
 
     pub fn get_gcounters(&self) -> GeoCounters {
@@ -370,5 +415,14 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
 
     pub fn bind_gcounter_buffer(&self) {
         self.bind_gcounter_buffer_to(SSBO_BINDING_GBANK_GCOUNTER);
+    }
+
+    pub fn bind_instancing_buffers_to(&self, index: u32) {
+        self.instancing.bind_arrays(index);
+    }
+
+    pub fn bind_instancing_buffers(&self) {
+        self.instancing
+            .bind_arrays(SSBO_BINDING_GBANK_INSTANCE_DATA);
     }
 }

@@ -10,6 +10,89 @@ pub mod reflection_filtering;
 
 pub type ShCoeffsBuffer = SingleBuffer<[f32; 4]>;
 
+pub const LIB_QUATERNION_TO_MAT: GlslLib = ethel::shader_glsl_lib! {
+    mat3 rendrs_QuaternionToMatrix [ q: vec4 ] => "
+        mat3 m = mat3(0.0);
+
+        float sqx = q.x * q.x;
+        float sqy = q.y * q.y;
+        float sqz = q.z * q.z;
+        float sqw = q.w * q.w;
+
+        float invs = 1.0 / (sqx + sqy + sqz + sqw);
+        m[0][0] = (sqx - sqy - sqz + sqw) * invs;
+        m[1][1] = (-sqx + sqy - sqz + sqw) * invs;
+        m[2][2] = (-sqx - sqy + sqz + sqw) * invs;
+
+        float tmp1 = q.x * q.y;
+        float tmp2 = q.z * q.w;
+        m[1][0] = 2.0 * (tmp1 + tmp2) * invs;
+        m[0][1] = 2.0 * (tmp1 - tmp2) * invs;
+
+        tmp1 = q.x * q.z;
+        tmp2 = q.y * q.w;
+        m[2][0] = 2.0 * (tmp1 - tmp2) * invs;
+        m[0][2] = 2.0 * (tmp1 + tmp2) * invs;
+
+        tmp1 = q.y * q.z;
+        tmp2 = q.x * q.w;
+        m[2][1] = 2.0 * (tmp1 + tmp2) * invs;
+        m[1][2] = 2.0 * (tmp1 - tmp2) * invs;
+
+        return m;
+    "
+};
+
+pub const LIB_QUATERNION_MUL: GlslLib = ethel::shader_glsl_lib! {
+    vec4 rendrs_QuaternionMul [ q0: vec4, q1: vec4 ] => "
+        vec4 r;
+        r.x = (q0.w * q1.x) + (q0.x * q1.w) + (q0.y * q1.z) - (q0.z * q1.y);
+        r.y = (q0.w * q1.y) - (q0.x * q1.z) + (q0.y * q1.w) + (q0.z * q1.x);
+        r.z = (q0.w * q1.z) + (q0.x * q1.y) - (q0.y * q1.x) + (q0.z * q1.w);
+        r.w = (q0.w * q1.w) - (q0.x * q1.x) - (q0.y * q1.y) - (q0.z * q1.z);
+        return r;
+    "
+};
+
+/// `Quaternion x Vector3` multiplication utility function.
+///
+/// Creates the `rendrs_QuaternionMul` function, taking, in order, the
+/// `vec3` to rotate and then the quaternion rotation represented by a
+/// `vec4`.
+///
+/// Returns the rotated `vec3`, the given vector is not changed.
+///
+/// Depends on [`LIB_QUATERNION_MUL`];
+pub const LIB_QUATERNION_MUL_VEC: GlslLib = ethel::shader_glsl_lib! {
+    vec3 rendrs_QuaternionMul [ p: vec3, q: vec4 ] => "
+        vec4 q_conj = vec4(-q.x, -q.y, -q.z, q.w);
+        vec4 p4 = vec4(p, 0.0);
+
+        vec4 r = rendrs_QuaternionMul(q, p4);
+        r = rendrs_QuaternionMul(r, q_conj);
+        return r.xyz;
+    "
+};
+
+pub const LIB_QUATERNION_SLERP: GlslLib = ethel::shader_glsl_lib! {
+    vec4 rendrs_QuaternionSlerp [ q0: vec4, q1: vec4, t: float ] => "
+        float dotp = dot(normalize(q0), normalize(q1));
+
+        // non-orthogonal
+        if (abs(dotp) > 0.9999) {
+            if (t <= 0.5) {
+                return q0;
+            }
+            return q1;
+        }
+
+        float theta = acos(dotp);
+        vec4 B = ((q0 * sin((1.0 - t) * theta) + q1 * sin(t * theta)) / sin(theta));
+        B.w = 1.0;
+        return B;
+    "
+};
+
 /// Utility function for cubemap UV conversion.
 ///
 /// Creates the `rendrs_CubemapUV` function, which takes the following

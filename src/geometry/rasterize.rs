@@ -91,21 +91,32 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
         depth_out: OutputObject,
     ) -> Self {
         let shader = ShaderGeomRasterize::new_compiled_variant(variant);
-        let cpy_shader = ComputeShaderGeomRasterCpyOpts::new_compiled();
+
+        let cpy_variant = if matches!(variant, ShaderGeomRasterizeVariants::Instanced) {
+            ComputeShaderGeomRasterCpyOptsVariants::Instanced
+        } else {
+            ComputeShaderGeomRasterCpyOptsVariants::Default
+        };
+        let cpy_shader = ComputeShaderGeomRasterCpyOpts::new_compiled_variant(cpy_variant);
 
         const DEFAULT_DRAW_CMD: DrawElementsIndirectCommand = DrawElementsIndirectCommand {
             count: 0,
-            instance_count: 1,
+            instance_count: 0,
             first_vertex: 0,
             base_vertex: 0,
             base_instance: 0,
         };
         let handle_view = shader.handle().view();
 
+        const COMMAND_CAP: usize = super::MAX_INSTANCELIST_COUNT as usize + 1;
+
         Self {
             shader,
             cpy_shader,
-            opts_buffer: SingleBuffer::new(1, InitStrategy::FillWith(|| DEFAULT_DRAW_CMD)),
+            opts_buffer: SingleBuffer::new(
+                COMMAND_CAP,
+                InitStrategy::FillWith(|| DEFAULT_DRAW_CMD),
+            ),
             inner: DrawPass::new(handle_view, [], [raster_out, depth_out], |_, ctx| {
                 let GeomRasterizeCtx {
                     gbank,
@@ -131,7 +142,9 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                 gbank
                     .triangle_buffers()
                     .bind_attribs(G_RASTER_SSBO_BIND_TRIANGLE_ATTRIBS);
+
                 gbank.bind_gcounter_buffer();
+                gbank.bind_instancing_buffers();
 
                 opts_buffer.bind_shader_storage(G_RASTER_SSBO_BIND_CPYOPTS, 0);
                 cpy_shader.bind();
@@ -282,14 +295,14 @@ ethel::shader_glsl! {
                 super::TYPE_INSTANCE_TRANSFORM
             };
             ssbo {
-                // gbank ssbos bound using runtime arrays as we are not
-                // concerned  with the number of ssbo bindings here
+                // gbank ssbos bound using runtime arrays as there is no
+                // concern about ssbo binding limit here
                 ethel::shader_glsl_ssbo! {
                     buf rendrs_Geom_Rasterize_VertexPositions => {
                         [dyn_array float : rendrs_vertex_positions => each 3]
                     }
                 }
-                super::SSBO_INSTANCING_DATA
+                super::shader::SSBO_GBANK_INSTANCING_DATA
             };
             lib {
                 GlslLib::new("");
@@ -341,8 +354,8 @@ ethel::shader_glsl! {
                 crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
             };
             ssbo {
-                // gbank ssbos bound using runtime arrays as we are not
-                // concerned  with the number of ssbo bindings here
+                // gbank ssbos bound using runtime arrays as there is no
+                // concern about ssbo binding limit here
                 ethel::shader_glsl_ssbo! {
                     buf rendrs_Geom_Rasterize_TriangleAttribs => {
                         [dyn_array TriangleAttribs : rendrs_triangle_attribs]
@@ -372,23 +385,68 @@ ethel::shader_glsl_compute! {
         type {
             TYPE_DRAWCMD_INDIRECT_ARRAYS
             TYPE_DRAWCMD_INDIRECT_ELEMENTS
+            super::shader::TYPE_INSTANCELIST
+            super::shader::TYPE_INSTANCE_TRANSFORM
         };
         ssbo {
             super::shader::SSBO_GBANK_GCOUNTER
+            super::shader::SSBO_GBANK_INSTANCING_DATA
 
             ethel::shader_glsl_ssbo! {
                 buf rendrs_Geom_Rasterize_CpyOptsOut => {
-                    DrawElementsIndirectCommand : out_cmd;
+                    [dyn_array DrawElementsIndirectCommand : out_cmd]
                 }
             }
         };
+        variants {
+            Batched;
+            Instanced;
+        };
 
         src() {
-            "
-            uint gc_vert = atomicExchange(rendrs_gbank_gcounter_vertex, 0u);
-            uint gc_tris = atomicExchange(rendrs_gbank_gcounter_triangle, 0u);
-            out_cmd.count = gc_tris * 3;
-            ";
+            match {
+                Instanced => {
+                    "
+                    atomicExchange(rendrs_gbank_gcounter_instance, 0u);
+                    const uint gc_instancelist = atomicExchange(rendrs_gbank_gcounter_instancelist, 0u);
+
+                    //0 reserved to batch draw command
+                    for (uint i = 1; i <= gc_instancelist; ++i) {
+                        const uint j = i - 1;
+                        const InstanceList list = rendrs_gbank_instance_lists[j];
+                        const uint instance_base = list.instance_base_count >> 16;
+                        //const uint instance_count = list.instance_base_count & 0x0000ffff;
+                        const uint instance_count = 1;
+                        out_cmd[i] = DrawElementsIndirectCommand(
+                            list.tri_count * 3,
+                            instance_count,
+                            list.tri_base * 3,
+                            0,
+                            instance_base
+                        );
+                    }
+
+                    // set rest to 0
+                    #define INSTANCELIST_CAP 1024
+                    const uint rest = INSTANCELIST_CAP - gc_instancelist;
+                    if (rest > 0) {
+                        for (uint i = gc_instancelist; i < INSTANCELIST_CAP; ++i) {
+                            out_cmd[i + 1].instance_count = 0;
+                        }
+                    }
+
+                    ";
+                };
+                _ => {
+                    "
+                    uint gc_vert = atomicExchange(rendrs_gbank_gcounter_vertex, 0u);
+                    uint gc_tris = atomicExchange(rendrs_gbank_gcounter_triangle, 0u);
+                    //0 reserved to batch draw command
+                    out_cmd[0].count = gc_tris * 3;
+                    out_cmd[0].instance_count = 1;
+                    ";
+                };
+            }
         }
     }
 }
@@ -592,8 +650,8 @@ ethel::shader_glsl_compute! {
             crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
         };
         ssbo {
-            // gbank ssbos stored with runtime arrays as we are not
-            // concerned  with the number of ssbo bindings here
+            // gbank ssbos bound using runtime arrays as there is no
+            // concern about ssbo binding limit here
             ethel::shader_glsl_ssbo! {
                 buf rendrs_Geom_Rasterize_VertexPositions => {
                     [dyn_array float : rendrs_vertex_positions => each 3]
