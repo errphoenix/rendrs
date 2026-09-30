@@ -115,13 +115,14 @@ pub const SSBO_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
 /// The definition syntax for each of these is identical to
 /// [`ethel's compute shaders`].
 ///
-/// **NOTE**: Any additional SSBO must begin at index 5, as the first 3 binding indices
-/// are reserved for geometry data.
+/// **NOTE**: Any additional SSBO must begin at index 5, as the first 4 binding indices
+/// (from 0 to 4) are reserved for geometry data.
 ///
 /// (Also ensure no types are named exactly 'Vertex' or 'Triangle', as these
 /// names are already used for functions)
 ///
-/// The triangle indices data can be bound as an EBO for indexed drawing.
+/// The triangle indices data array populated by geometry submission jobs
+/// should be later used as an `EBO` for indexed drawing.
 ///
 /// ## Context
 ///
@@ -153,17 +154,18 @@ pub const SSBO_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
 ///
 /// The shader's source has access to the following parameters:
 /// * GLSL's standard compute shader variables (`gl_GlobalInvocationID`, etc.)*
-/// * `rendrs_GeometryID` the index of the current working geometric entity
+/// * `rendrs_GeometryID` the index of the current working geometric entity.
 /// * `rendrs_DomainIndex` the local index of the current working domain of the
-///   current geometric entity
+///   current geometric entity. A maximum of 255 can be dispatched for one
+///   entity.
 /// * `rendrs_WorkGroupID` the global index of the current working domain,
-///   equal to `gl_WorkGroupID.x`
+///   equal to `gl_WorkGroupID.x`.
 /// * `rendrs_ThreadID` the thread index (invocation) local to the current
-///   working geometric entity
+///   working geometric entity.
 /// * `rendrs_DomainThreadID` the thread index (invocation) local to the
-///   current working domain, equal to `gl_LocalInvocationID.x`
+///   current working domain, equal to `gl_LocalInvocationID.x`.
 /// * `rendrs_GlobalThreadID` the global thread index (invocation), equal
-///   to `gl_GlobalInvocationID.x`
+///   to `gl_GlobalInvocationID.x`.
 ///
 /// *Note that the shader's workgroup (frequently referred to as `domain`) is
 /// of linear size 64 (x=64,y=1,z=1).

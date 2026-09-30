@@ -85,8 +85,12 @@ pub struct GeomRasterizePass<V: HasVertexBuffers, T: HasTriangleBuffers> {
 impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
     /// Expects an RG32UI `raster_out` color attachment, as returned by
     /// [`geom_rasterize_target`] and a depth attachment.
-    pub fn new(raster_out: OutputObject, depth_out: OutputObject) -> Self {
-        let shader = ShaderGeomRasterize::new_compiled();
+    pub fn new(
+        variant: ShaderGeomRasterizeVariants,
+        raster_out: OutputObject,
+        depth_out: OutputObject,
+    ) -> Self {
+        let shader = ShaderGeomRasterize::new_compiled_variant(variant);
         let cpy_shader = ComputeShaderGeomRasterCpyOpts::new_compiled();
 
         const DEFAULT_DRAW_CMD: DrawElementsIndirectCommand = DrawElementsIndirectCommand {
@@ -275,6 +279,7 @@ ethel::shader_glsl! {
             };
             type {
                 super::TYPE_INSTANCELIST
+                super::TYPE_INSTANCE_TRANSFORM
             };
             ssbo {
                 // gbank ssbos bound using runtime arrays as we are not
@@ -308,13 +313,13 @@ ethel::shader_glsl! {
                         uint instance_id   = gl_InstanceID + instance_base;
 
                         InstanceTransform transform = rendrs_gbank_instance_transforms[instance_id];
-                        float scaling = transform.s;
-                        vec4 rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
-                        vec3 position = vec3(transform.px, transform.py, transform.pz);
+                        float t_scaling  = transform.s;
+                        vec4  t_rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
+                        vec3  t_position = vec3(transform.px, transform.py, transform.pz);
 
-                        P_world.xyz *= scaling;
-                        P_world.xyz  = rendrs_QuaternionMul(P_world.xyz, rotation);
-                        P_world.xyz += position;
+                        P_world.xyz *= t_scaling;
+                        P_world.xyz  = rendrs_QuaternionMul(P_world.xyz, t_rotation);
+                        P_world.xyz += t_position;
                         ";
                     };
                 }
