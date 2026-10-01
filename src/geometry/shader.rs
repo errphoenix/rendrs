@@ -85,8 +85,8 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
 
 pub const SSBO_GBANK_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_InstanceData => {
-        InstanceTransform : rendrs_gbank_instance_transforms[65535];
         InstanceList      : rendrs_gbank_instance_lists[1024];
+        InstanceTransform : rendrs_gbank_instance_transforms[65535];
     }
 };
 

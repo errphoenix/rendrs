@@ -428,8 +428,7 @@ ethel::shader_glsl_compute! {
                         const uint j = i - 1;
                         const InstanceList list = rendrs_gbank_instance_lists[j];
                         const uint instance_base = list.instance_base_count >> 16;
-                        //const uint instance_count = list.instance_base_count & 0x0000ffff;
-                        const uint instance_count = 1;
+                        const uint instance_count = list.instance_base_count & 0x0000ffff;
                         out_cmd[i] = DrawElementsIndirectCommand(
                             list.tri_count * 3,
                             instance_count,
