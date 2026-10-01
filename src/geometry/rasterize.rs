@@ -78,6 +78,7 @@ pub fn geom_attribs_gradients_target(
 #[derive(Debug)]
 pub struct GeomRasterizePass<V: HasVertexBuffers, T: HasTriangleBuffers> {
     inner: DrawPass<GeomRasterizeCtxWrapper<V, T>, 0, 2>,
+    variant: ShaderGeomRasterizeVariants,
     shader: ShaderGeomRasterize,
     cpy_shader: ComputeShaderGeomRasterCpyOpts,
     opts_buffer: SingleBuffer<DrawElementsIndirectCommand>, //more opts?
@@ -112,6 +113,7 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
 
         Self {
             shader,
+            variant,
             cpy_shader,
             opts_buffer: SingleBuffer::new(
                 COMMAND_CAP,
@@ -121,6 +123,7 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                 let GeomRasterizeCtx {
                     gbank,
                     shader,
+                    variant,
                     cpy_shader,
                     opts_buffer,
                     m_proj,
@@ -164,13 +167,22 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                         janus::gl::DRAW_INDIRECT_BUFFER,
                         opts_buffer.resource_id(),
                     );
-                    janus::gl::MultiDrawElementsIndirect(
-                        janus::gl::TRIANGLES,
-                        janus::gl::UNSIGNED_INT,
-                        std::ptr::null(),
-                        1,
-                        0,
-                    );
+                    match variant {
+                        Instanced => janus::gl::MultiDrawElementsIndirect(
+                            janus::gl::TRIANGLES,
+                            janus::gl::UNSIGNED_INT,
+                            size_of::<DrawElementsIndirectCommand>() as *const _,
+                            super::MAX_INSTANCELIST_COUNT as i32,
+                            0,
+                        ),
+                        _ => janus::gl::MultiDrawElementsIndirect(
+                            janus::gl::TRIANGLES,
+                            janus::gl::UNSIGNED_INT,
+                            std::ptr::null(),
+                            1,
+                            0,
+                        ),
+                    }
                 }
             }),
         }
@@ -201,6 +213,7 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
     ) {
         let ctx = GeomRasterizeCtx {
             shader: &self.shader,
+            variant: self.variant,
             cpy_shader: &self.cpy_shader,
             opts_buffer: &self.opts_buffer,
             gbank,
@@ -220,8 +233,9 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
 
 #[derive(Debug)]
 pub struct GeomRasterizeCtx<'ctx, V: HasVertexBuffers, T: HasTriangleBuffers> {
-    pub gbank: &'ctx GeometryBank<V, T>,
     pub shader: &'ctx ShaderGeomRasterize,
+    pub variant: ShaderGeomRasterizeVariants,
+    pub gbank: &'ctx GeometryBank<V, T>,
     pub cpy_shader: &'ctx ComputeShaderGeomRasterCpyOpts,
     pub opts_buffer: &'ctx SingleBuffer<DrawElementsIndirectCommand>,
     pub m_proj: [f32; 16],
@@ -321,7 +335,6 @@ ethel::shader_glsl! {
                         "
                         uint draw_id    = gl_DrawID - instance_command_offset;
                         InstanceList il = rendrs_gbank_instance_lists[draw_id];
-
                         uint instance_base = il.instance_base_count >> 16;
                         uint instance_id   = gl_InstanceID + instance_base;
 

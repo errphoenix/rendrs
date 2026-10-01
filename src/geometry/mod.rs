@@ -222,6 +222,15 @@ const GCOUNTER_COUNT: usize = 4;
 /// Index 3 = instances counter
 pub type GCounterBuffer = SingleBuffer<[u32; GCOUNTER_COUNT]>;
 
+/// Atomic counters buffer.
+///
+/// Index 0 = vertex counter
+///
+/// Index 1 = triangle counter
+///
+/// Index 2 = instance lists counter
+///
+/// Index 3 = instances counter
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GeoCounters(u32, u32, u32, u32);
 impl GeoCounters {
@@ -352,6 +361,15 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeometryBank<V, T> {
         &self.instancing
     }
 
+    /// Atomic counters buffer.
+    ///
+    /// Index 0 = vertex counter
+    ///
+    /// Index 1 = triangle counter
+    ///
+    /// Index 2 = instance lists counter
+    ///
+    /// Index 3 = instances counter
     pub fn get_gcounters(&self) -> GeoCounters {
         let gcounter_buf = self.gcounter.resource_id();
         let mut dst = GeoCounters::default();
