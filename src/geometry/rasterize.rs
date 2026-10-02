@@ -298,6 +298,11 @@ ethel::shader_glsl! {
         };
 
         unit ShaderKind::Vertex => [
+            attribs {
+                ethel::shader_glsl_attribs! {
+                    output instanceId : uint as flat;
+                }
+            };
             uniform {
                 length 1, proj_mat : mat4 => [f32; 16];
                 length 1, view_mat : mat4 => [f32; 16];
@@ -316,7 +321,7 @@ ethel::shader_glsl! {
                         [dyn_array float : rendrs_vertex_positions => each 3]
                     }
                 }
-                super::shader::SSBO_GBANK_INSTANCING_DATA
+                super::SSBO_GBANK_INSTANCING_DATA
             };
             lib {
                 GlslLib::new("");
@@ -336,7 +341,7 @@ ethel::shader_glsl! {
                         uint draw_id    = gl_DrawID - instance_command_offset;
                         InstanceList il = rendrs_gbank_instance_lists[draw_id];
                         uint instance_base = il.instance_base_count >> 16;
-                        uint instance_id   = gl_InstanceID + instance_base;
+                        uint instance_id   = gl_InstanceID;
 
                         InstanceTransform transform = rendrs_gbank_instance_transforms[instance_id];
                         float t_scaling  = transform.s;
@@ -346,6 +351,8 @@ ethel::shader_glsl! {
                         P_world.xyz *= t_scaling;
                         P_world.xyz  = rendrs_QuaternionMul(P_world.xyz, t_rotation);
                         P_world.xyz += t_position;
+
+                        instanceId = instance_id;
                         ";
                     };
                 }
@@ -360,11 +367,12 @@ ethel::shader_glsl! {
         unit ShaderKind::Pixel => [
             attribs {
                 ethel::shader_glsl_attribs! {
-                    output outColor : uvec2;
+                    input instanceId : uint as flat;
+                    output outColor  : uvec2;
                 }
             };
             type {
-                crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+                super::TYPE_TRIANGLE_ATTRIBS
             };
             ssbo {
                 // gbank ssbos bound using runtime arrays as there is no
@@ -380,9 +388,31 @@ ethel::shader_glsl! {
                 "
                 TriangleAttribs tri_attribs = rendrs_triangle_attribs[gl_PrimitiveID];
 
-                //todo: more metadata in g channel (tri-attrs), bit-packing
+                // full 32 bits for triangle index
                 uint R = gl_PrimitiveID + 1;
-                uint G = tri_attribs.geometry_id;
+
+                // 16 bits for optional instance id
+                // 1  bit  for 'is instanced' flag
+                // 15 bits for geometry id
+
+                #define G_MASK_15B 0x7fff
+
+                const uint geometry_id = tri_attribs.geometry_id;
+
+                ";
+                match {
+                    Instanced => "
+                        const uint is_instanced = 1 << 15;
+                        const uint instance_id  = instanceId << 16;
+                    ";
+                    Batched => "
+                        const uint is_instanced = 0;
+                        const uint instance_id  = 0;
+                    ";
+                }
+                "
+
+                uint G = instance_id | is_instanced | (geometry_id & G_MASK_15B);
 
                 outColor = uvec2(R, G);
                 ";
@@ -398,12 +428,12 @@ ethel::shader_glsl_compute! {
         type {
             TYPE_DRAWCMD_INDIRECT_ARRAYS
             TYPE_DRAWCMD_INDIRECT_ELEMENTS
-            super::shader::TYPE_INSTANCELIST
-            super::shader::TYPE_INSTANCE_TRANSFORM
+            super::TYPE_INSTANCELIST
+            super::TYPE_INSTANCE_TRANSFORM
         };
         ssbo {
-            super::shader::SSBO_GBANK_GCOUNTER
-            super::shader::SSBO_GBANK_INSTANCING_DATA
+            super::SSBO_GBANK_GCOUNTER
+            super::SSBO_GBANK_INSTANCING_DATA
 
             ethel::shader_glsl_ssbo! {
                 buf rendrs_Geom_Rasterize_CpyOptsOut => {
@@ -424,12 +454,11 @@ ethel::shader_glsl_compute! {
                     const uint gc_instancelist = atomicExchange(rendrs_gbank_gcounter_instancelist, 0u);
 
                     //0 reserved to batch draw command
-                    for (uint i = 1; i <= gc_instancelist; ++i) {
-                        const uint j = i - 1;
-                        const InstanceList list = rendrs_gbank_instance_lists[j];
-                        const uint instance_base = list.instance_base_count >> 16;
+                    for (uint i = 0; i < gc_instancelist; ++i) {
+                        const InstanceList list   = rendrs_gbank_instance_lists[i];
+                        const uint instance_base  = list.instance_base_count >> 16;
                         const uint instance_count = list.instance_base_count & 0x0000ffff;
-                        out_cmd[i] = DrawElementsIndirectCommand(
+                        out_cmd[i + 1] = DrawElementsIndirectCommand(
                             list.tri_count * 3,
                             instance_count,
                             list.tri_base * 3,
@@ -446,7 +475,6 @@ ethel::shader_glsl_compute! {
                             out_cmd[i + 1].instance_count = 0;
                         }
                     }
-
                     ";
                 };
                 _ => {
@@ -659,7 +687,9 @@ ethel::shader_glsl_compute! {
             on ATTRIB_INTERP_IMAGE_BIND_GRADS => ima_grads   : image2D  as rgba16f writeonly;
         };
         type {
-            crate::geometry::shader::TYPE_TRIANGLE_ATTRIBS
+            super::TYPE_TRIANGLE_ATTRIBS
+            super::TYPE_INSTANCELIST
+            super::TYPE_INSTANCE_TRANSFORM
         };
         ssbo {
             // gbank ssbos bound using runtime arrays as there is no
@@ -689,6 +719,7 @@ ethel::shader_glsl_compute! {
                     [dyn_array TriangleAttribs : rendrs_triangle_attribs]
                 }
             }
+            super::SSBO_GBANK_INSTANCING_DATA
         };
         lib {
             PACK_OCTAHEDRON_WRAP_UTIL;
@@ -696,6 +727,8 @@ ethel::shader_glsl_compute! {
             PACK_OCTAHEDRON_DECODE;
             UTIL_DERIVE_COTANGENT_GRAD;
             INTERNAL_UTIL_ATTR_INTERP_PROJECT_TO_SCREEN;
+            LIB_QUATERNION_MUL;
+            LIB_QUATERNION_MUL_VEC;
         };
 
         src() {
@@ -704,8 +737,23 @@ ethel::shader_glsl_compute! {
 
             if (px.x >= resolution.x || px.y >= resolution.y) return;
             uvec2 raster_data = imageLoad(ima_raster, px).rg;
+
+            // full 32 bits for triangle index
             uint Tid = raster_data.x;
-            uint Gid = raster_data.y;
+
+            // 16 bits for optional instance id
+            // 1  bit  for 'is instanced' flag
+            // 15 bits for geometry id
+            #define G_MASK_15B 0x7fff
+            uint G   = raster_data.y;
+            const uint G16br = G & uint(0x0000ffff);
+            const uint G16bl = G & uint(0xffff0000);
+
+            const bool is_inst = bool(G16br >> 15);
+            const uint inst_id = G16bl;
+
+            uint Gid = G16br & G_MASK_15B;
+
             if (Tid == 0) {
                 imageStore(ima_space, px, vec4(0.0));
                 imageStore(ima_grads, px, vec4(0.0));
@@ -721,11 +769,28 @@ ethel::shader_glsl_compute! {
             vec3 p1 = vec3(b_p1[0], b_p1[1], b_p1[2]);
             vec3 p2 = vec3(b_p2[0], b_p2[1], b_p2[2]);
 
-            mat4 MVP = proj_mat * view_mat;
+            if (is_inst) {
+                InstanceTransform transform = rendrs_gbank_instance_transforms[inst_id];
+                float t_scaling  = transform.s;
+                vec4  t_rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
+                vec3  t_position = vec3(transform.px, transform.py, transform.pz);
 
-            vec2 s_v0 = _rendrs_Project_ScreenSpace(MVP, resolution, p0);
-            vec2 s_v1 = _rendrs_Project_ScreenSpace(MVP, resolution, p1);
-            vec2 s_v2 = _rendrs_Project_ScreenSpace(MVP, resolution, p2);
+                p0 *= t_scaling;
+                p1 *= t_scaling;
+                p2 *= t_scaling;
+                p0  = rendrs_QuaternionMul(p0, t_rotation);
+                p1  = rendrs_QuaternionMul(p1, t_rotation);
+                p2  = rendrs_QuaternionMul(p2, t_rotation);
+                p0 += t_position;
+                p1 += t_position;
+                p2 += t_position;
+            }
+
+            const mat4 VP = proj_mat * view_mat;
+
+            vec2 s_v0 = _rendrs_Project_ScreenSpace(VP, resolution, p0);
+            vec2 s_v1 = _rendrs_Project_ScreenSpace(VP, resolution, p1);
+            vec2 s_v2 = _rendrs_Project_ScreenSpace(VP, resolution, p2);
 
             vec2 px_c = vec2(px) + 0.5;
             float inv_det = 1.0 / ((s_v1.x - s_v0.x) * (s_v2.y - s_v0.y) - (s_v2.x - s_v0.x) * (s_v1.y - s_v0.y));
@@ -733,9 +798,9 @@ ethel::shader_glsl_compute! {
             float B_w = ((s_v1.x - s_v0.x) * (px_c.y - s_v0.y) - (s_v1.y - s_v0.y) * (px_c.x - s_v0.x)) * inv_det;
             float B_u = 1.0 - B_v - B_w;
 
-            float w_p0 = (MVP * vec4(p0, 1.0)).w;
-            float w_p1 = (MVP * vec4(p1, 1.0)).w;
-            float w_p2 = (MVP * vec4(p2, 1.0)).w;
+            float w_p0 = (VP * vec4(p0, 1.0)).w;
+            float w_p1 = (VP * vec4(p1, 1.0)).w;
+            float w_p2 = (VP * vec4(p2, 1.0)).w;
             float iw0 = 1.0 / w_p0;
             float iw1 = 1.0 / w_p1;
             float iw2 = 1.0 / w_p2;
@@ -780,7 +845,7 @@ ethel::shader_glsl_compute! {
             vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
             vec3 b_n1d = rendrs_unpackOctahedron(vec2(b_n1[0], b_n1[1]));
             vec3 b_n2d = rendrs_unpackOctahedron(vec2(b_n2[0], b_n2[1]));
-            vec3 N  = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
+            vec3 N   = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
             mat3 TBN = rendrs_deriveCotangentGrad(N, ddxP, ddyP, ddxUv, ddyUv);
             vec3 T   = TBN[0];
             vec2 Te = rendrs_packOctahedron(T); //unorm16
