@@ -752,12 +752,12 @@ ethel::shader_glsl_compute! {
             // 1  bit  for 'is instanced' flag
             // 15 bits for geometry id
             #define G_MASK_15B 0x7fff
-            uint G   = raster_data.y;
-            const uint G16br = G & uint(0x0000ffff);
-            const uint G16bl = G & uint(0xffff0000);
+            const uint G = raster_data.y;
+            const uint G16br = G & 0x0000ffffu;
+            const uint G16bl = G & 0xffff0000u;
 
             const bool is_inst = bool(G16br >> 15);
-            const uint inst_id = G16bl;
+            const uint inst_id = G16bl >> 16;
 
             uint Gid = G16br & G_MASK_15B;
 
@@ -776,6 +776,7 @@ ethel::shader_glsl_compute! {
             vec3 p1 = vec3(b_p1[0], b_p1[1], b_p1[2]);
             vec3 p2 = vec3(b_p2[0], b_p2[1], b_p2[2]);
 
+            vec4 inst_Q;
             if (is_inst) {
                 InstanceTransform transform = rendrs_gbank_instance_transforms[inst_id];
                 float t_scaling  = transform.s;
@@ -791,6 +792,8 @@ ethel::shader_glsl_compute! {
                 p0 += t_position;
                 p1 += t_position;
                 p2 += t_position;
+
+                inst_Q = t_rotation;
             }
 
             const mat4 VP = proj_mat * view_mat;
@@ -852,7 +855,12 @@ ethel::shader_glsl_compute! {
             vec3 b_n0d = rendrs_unpackOctahedron(vec2(b_n0[0], b_n0[1]));
             vec3 b_n1d = rendrs_unpackOctahedron(vec2(b_n1[0], b_n1[1]));
             vec3 b_n2d = rendrs_unpackOctahedron(vec2(b_n2[0], b_n2[1]));
-            vec3 N   = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
+
+            vec3 N = normalize(b_n0d * B_u + b_n1d * B_v + b_n2d * B_w);
+            if (is_inst) {
+                N = rendrs_QuaternionMul(N, inst_Q);
+            }
+
             mat3 TBN = rendrs_deriveCotangentGrad(N, ddxP, ddyP, ddxUv, ddyUv);
             vec3 T   = TBN[0];
             vec2 Te = rendrs_packOctahedron(T); //unorm16
