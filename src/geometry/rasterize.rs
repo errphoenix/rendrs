@@ -156,6 +156,7 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                 shader.bind();
                 shader.uniform_proj_mat_mat4v([*m_proj]);
                 shader.uniform_view_mat_mat4v([*m_view]);
+                shader.uniform_instance_command_offset_uintv([0]);
 
                 janus::gl::barrier_shader_storage();
                 janus::gl::barrier_commands();
@@ -300,7 +301,8 @@ ethel::shader_glsl! {
         unit ShaderKind::Vertex => [
             attribs {
                 ethel::shader_glsl_attribs! {
-                    output instanceId : uint as flat;
+                    output instanceId      : uint as flat;
+                    output instanceTriBase : uint as flat;
                 }
             };
             uniform {
@@ -334,6 +336,7 @@ ethel::shader_glsl! {
                 float position[] = rendrs_vertex_positions[gl_VertexID];
                 vec3 P_model = vec3(position[0], position[1], position[2]);
                 vec4 P_world = vec4(P_model, 1.0);
+                instanceTriBase = 0;
                 ";
                 match {
                     Instanced => {
@@ -341,7 +344,7 @@ ethel::shader_glsl! {
                         uint draw_id    = gl_DrawID - instance_command_offset;
                         InstanceList il = rendrs_gbank_instance_lists[draw_id];
                         uint instance_base = il.instance_base_count >> 16;
-                        uint instance_id   = gl_InstanceID;
+                        uint instance_id   = gl_BaseInstance + gl_InstanceID;
 
                         InstanceTransform transform = rendrs_gbank_instance_transforms[instance_id];
                         float t_scaling  = transform.s;
@@ -353,6 +356,7 @@ ethel::shader_glsl! {
                         P_world.xyz += t_position;
 
                         instanceId = instance_id;
+                        instanceTriBase = il.tri_base;
                         ";
                     };
                 }
@@ -367,8 +371,9 @@ ethel::shader_glsl! {
         unit ShaderKind::Pixel => [
             attribs {
                 ethel::shader_glsl_attribs! {
-                    input instanceId : uint as flat;
-                    output outColor  : uvec2;
+                    input instanceId      : uint as flat;
+                    input instanceTriBase : uint as flat;
+                    output outColor       : uvec2;
                 }
             };
             type {
@@ -386,10 +391,12 @@ ethel::shader_glsl! {
 
             src() {
                 "
-                TriangleAttribs tri_attribs = rendrs_triangle_attribs[gl_PrimitiveID];
+                uint triangleID = gl_PrimitiveID + instanceTriBase;
+
+                TriangleAttribs tri_attribs = rendrs_triangle_attribs[triangleID];
 
                 // full 32 bits for triangle index
-                uint R = gl_PrimitiveID + 1;
+                uint R = triangleID + 1;
 
                 // 16 bits for optional instance id
                 // 1  bit  for 'is instanced' flag
