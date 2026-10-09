@@ -402,9 +402,9 @@ ethel::shader_glsl! {
                 // 1  bit  for 'is instanced' flag
                 // 15 bits for material id
 
-                #define G_MASK_15B 0x7fff
+                #define G_MASK_15B 0x7fffu
 
-                const uint material_id = tri_attribs.material_id;
+                const uint material_id = tri_attribs.extra_material_id & 0xffffu;
 
                 ";
                 match {
