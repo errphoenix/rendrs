@@ -37,7 +37,7 @@ pub const TYPE_MATERIAL_LOCATION: GlslStruct = MaterialLocationGlslStruct::as_de
 
 ethel::shader_glsl_struct! {
     struct MaterialEntryLocation {
-        inner: u32 => uint
+        page16_group16: u32 => uint
     }
 }
 
