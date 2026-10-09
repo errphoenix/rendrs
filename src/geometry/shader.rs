@@ -10,6 +10,8 @@ ethel::shader_glsl_struct! {
 ethel::shader_glsl_struct! {
     struct TriangleAttribs {
         geometry_id : u32 => uint
+        // 16 bits extra, 16 bits material_id
+        extra_material_id : u32 => uint
     }
 }
 
@@ -212,10 +214,12 @@ pub const SSBO_GBANK_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
 ///   * `void TriangleDataIndices(uint handle, uint indices[3])`:
 ///      Fills the triangle attribs data for the triangle corresponding to
 ///      `handle` with the given data.
-///   * `void TriangleDataAttribs(uint handle, uint geom_id)`:
+///   * `void TriangleDataAttribs(uint handle, uint geom_id,
+///      uint mat_id, optional uint extra)`:
 ///      Fills the triangle indices data for the triangle corresponding to
 ///      `handle` with the given data.
-///   * `void TriangleData(uint handle, uint indices[3], uint geom_id)`:
+///   * `void TriangleData(uint handle, uint indices[3], uint geom_id
+///      uint mat_id, optional uint extra)`:
 ///      Fills the triangle data for the triangle corresponding to `handle`
 ///      with the given data.
 ///  * **One-off alloc + fill**
@@ -326,6 +330,7 @@ macro_rules! geometry_submission_job {
 
         #[derive(Debug)]
         pub struct [< $name GeomCtx >]<'ctx> {
+            pub _marker: std::marker::PhantomData<&'ctx ()>,
             $($(pub $ctx_field: $(&$ctx_lt)? $ctx_type,)+)?
         }
         $crate::context_wrapper!(for<'ctx> [< $name GeomCtx >]);
@@ -445,13 +450,21 @@ macro_rules! geometry_submission_job {
                         void TriangleDataIndices(uint index, uint data[3]) {
                             rendrs_gbank_triangle_indices[index] = data;
                         }
-                        void TriangleDataAttribs(uint index, uint geom_id) {
-                            TriangleAttribs attribs = TriangleAttribs(geom_id);
+                        void TriangleDataAttribs(uint index, uint geom_id, uint mat_id, uint extra) {
+                            TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id | (extra << 16));
                             rendrs_gbank_triangle_attribs[index] = attribs;
                         }
-                        void TriangleData(uint index, uint data[3], uint geom_id) {
+                        void TriangleDataAttribs(uint index, uint geom_id, uint mat_id) {
+                            TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id);
+                            rendrs_gbank_triangle_attribs[index] = attribs;
+                        }
+                        void TriangleData(uint index, uint data[3], uint geom_id, uint mat_id, uint extra) {
                             TriangleDataIndices(index, data);
-                            TriangleDataAttribs(index, geom_id);
+                            TriangleDataAttribs(index, geom_id, mat_id, extra);
+                        }
+                        void TriangleData(uint index, uint data[3], uint geom_id, uint mat_id) {
+                            TriangleDataIndices(index, data);
+                            TriangleDataAttribs(index, geom_id, mat_id);
                         }
                         "
                     });
@@ -463,6 +476,12 @@ macro_rules! geometry_submission_job {
                         }
                         TriangleAttribs GetTriangleAttribs(uint index) {
                             return rendrs_gbank_triangle_attribs[index];
+                        }
+                        uint GetTriangleAttribMaterialID(uint index) {
+                            return GetTriangleAttribs(index).extra_material_id & 0xffffu;
+                        }
+                        uint GetTriangleAttribExtra(uint index) {
+                            return GetTriangleAttribs(index).extra_material_id >> 16;
                         }
 
                         vec3 GetVertexPosition(uint index) {
@@ -482,9 +501,14 @@ macro_rules! geometry_submission_job {
                     // all-in-one alloc+data functions for convenience/testing
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
-                        uint AllocTriangleData(uint indices[3], uint geom_id) {
+                        uint AllocTriangleData(uint indices[3], uint geom_id, uint mat_id, uint extra) {
                             uint triangle_index = AllocTriangle();
-                            TriangleData(triangle_index, indices, geom_id);
+                            TriangleData(triangle_index, indices, geom_id, mat_id, extra);
+                            return triangle_index;
+                        }
+                        uint AllocTriangleData(uint indices[3], uint geom_id, uint mat_id) {
+                            uint triangle_index = AllocTriangle();
+                            TriangleData(triangle_index, indices, geom_id, mat_id);
                             return triangle_index;
                         }
                         uint AllocVertexData(vec3 p, vec2 n_oct, vec2 uv) {

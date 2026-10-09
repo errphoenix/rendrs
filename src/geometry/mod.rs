@@ -55,11 +55,12 @@ impl DomainData {
     }
 }
 
-/// todo
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TriangleAttribs {
     pub geometry_id: u32,
+    pub material_id: u16,
+    pub extra: u16,
 }
 
 pub trait HasVertexBuffers: GpuResource + std::fmt::Debug + 'static {

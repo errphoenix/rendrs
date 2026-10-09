@@ -400,11 +400,11 @@ ethel::shader_glsl! {
 
                 // 16 bits for optional instance id
                 // 1  bit  for 'is instanced' flag
-                // 15 bits for geometry id
+                // 15 bits for material id
 
                 #define G_MASK_15B 0x7fff
 
-                const uint geometry_id = tri_attribs.geometry_id;
+                const uint material_id = tri_attribs.material_id;
 
                 ";
                 match {
@@ -419,7 +419,7 @@ ethel::shader_glsl! {
                 }
                 "
 
-                uint G = instance_id | is_instanced | (geometry_id & G_MASK_15B);
+                uint G = instance_id | is_instanced | (material_id & G_MASK_15B);
 
                 outColor = uvec2(R, G);
                 ";
@@ -750,7 +750,7 @@ ethel::shader_glsl_compute! {
 
             // 16 bits for optional instance id
             // 1  bit  for 'is instanced' flag
-            // 15 bits for geometry id
+            // 15 bits for material id
             #define G_MASK_15B 0x7fff
             const uint G = raster_data.y;
             const uint G16br = G & 0x0000ffffu;
@@ -759,7 +759,7 @@ ethel::shader_glsl_compute! {
             const bool is_inst = bool(G16br >> 15);
             const uint inst_id = G16bl >> 16;
 
-            uint Gid = G16br & G_MASK_15B;
+            uint Mid = G16br & G_MASK_15B;
 
             if (Tid == 0) {
                 imageStore(ima_space, px, vec4(0.0));
