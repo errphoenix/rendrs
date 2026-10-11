@@ -41,6 +41,7 @@ pub struct MaterialGroupDescriptor {
 impl MaterialGroupDescriptor {
     pub fn new(pages: u16, size: u16) -> Self {
         assert!(pages > PAGE_OFFSET_RESERVED as u16);
+        tracing::info!("Initialized material group: {pages} pages, size: {size}x{size} pixels.");
         Self {
             pages,
             size,
@@ -185,6 +186,8 @@ impl MaterialGroupDescriptor {
     ) -> MaterialGroup {
         #[cfg(not(test))]
         janus::assert_gl!();
+
+        tracing::info!("Building material group...");
 
         let size = self.size as i32;
         #[cfg(not(test))]
@@ -348,6 +351,8 @@ impl MaterialGroupDescriptor {
                 }
             });
 
+        tracing::info!("Packed & cached material components, registering their locations...");
+
         self.desciptors.drain().for_each(|(id, descriptor)| {
             let (width, height) = {
                 if let Some(da) = descriptor.diffuse_alpha {
@@ -374,6 +379,9 @@ impl MaterialGroupDescriptor {
         self.materials.drain().for_each(|(id, location)| {
             material_registry.add(MaterialId(id), location);
         });
+
+        #[cfg(not(test))]
+        texture.generate_mipmaps();
 
         MaterialGroup {
             #[cfg(not(test))]

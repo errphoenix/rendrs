@@ -54,14 +54,15 @@ pub const FILTERING_MIP_COUNT: u32 = 6;
 ///
 /// Tip: use `glBindImageTexture`'s `level` field to specify the mip.
 pub const DOWNSCALE_IMAGE_BINDING_OUTPUT: u32 = 0;
+pub const REFERENCE_SAMPLER_INPUT: u32 = 0;
 pub const WORKSPACE_SIZE_XY: u32 = 8;
 
 ethel::shader_glsl_compute! {
     struct BSplineDownscale > [460] {
         workgroup [8, 8, 6];
 
-        uniform {
-            length 1, reference : samplerCube => i32;
+        sampler {
+            on REFERENCE_SAMPLER_INPUT => reference : samplerCube;
         };
         image {
             on DOWNSCALE_IMAGE_BINDING_OUTPUT => out_filtered : imageCube as rgba16f writeonly;

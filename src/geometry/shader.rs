@@ -295,7 +295,7 @@ macro_rules! geometry_submission_job {
             };
 
             $(uniform {
-                $(length $u_len:literal, $u_gl_name:ident: $u_gl_type:ident => $u_r_type:ty;)+
+                $(on $u_idx:expr $(, for $u_len:expr)? => $u_gl_name:ident : $u_gl_type:ident from $u_r_type:ty ; )+
             })?
             $(sampler {
                 $(on $s_idx:expr $(, for $s_len:expr)? => $us_name:ident : $sampler_type:ident ; )+
@@ -350,7 +350,7 @@ macro_rules! geometry_submission_job {
                 workgroup [64, 1, 1];
 
                 $(uniform {
-                    $(length $u_len, $u_gl_name: $u_gl_type => $u_r_type;)+
+                    $(on $u_idx $(, for $u_len)? => $u_gl_name : $u_gl_type from $u_r_type ;)+
                 };)?
                 $(sampler {
                     $(on $s_idx $(, for $s_len)? => $us_name : $sampler_type ; )+

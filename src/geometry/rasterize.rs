@@ -154,9 +154,9 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                 cpy_shader.dispatch([1, 1, 1]);
 
                 shader.bind();
-                shader.uniform_proj_mat_mat4v([*m_proj]);
-                shader.uniform_view_mat_mat4v([*m_view]);
-                shader.uniform_instance_command_offset_uintv([0]);
+                shader.uniform_proj_mat_mat4(*m_proj);
+                shader.uniform_view_mat_mat4(*m_view);
+                shader.uniform_instance_command_offset_uint(0);
 
                 janus::gl::barrier_shader_storage();
                 janus::gl::barrier_commands();
@@ -306,10 +306,9 @@ ethel::shader_glsl! {
                 }
             };
             uniform {
-                length 1, proj_mat : mat4 => [f32; 16];
-                length 1, view_mat : mat4 => [f32; 16];
-
-                length 1, instance_command_offset : uint => u32;
+                on 0 => proj_mat : mat4 from [f32; 16];
+                on 1 => view_mat : mat4 from [f32; 16];
+                on 2 => instance_command_offset : uint from u32;
             };
             type {
                 super::TYPE_INSTANCELIST
@@ -608,9 +607,9 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> AttribInterpolationPass<V, T> {
                     let wg_x = resolution.width().div_ceil(8);
                     let wg_y = resolution.height().div_ceil(8);
 
-                    shader.uniform_resolution_uvec2v([[resolution.width(), resolution.height()]]);
-                    shader.uniform_proj_mat_mat4v([*m_proj]);
-                    shader.uniform_view_mat_mat4v([*m_view]);
+                    shader.uniform_resolution_uvec2([resolution.width(), resolution.height()]);
+                    shader.uniform_proj_mat_mat4(*m_proj);
+                    shader.uniform_view_mat_mat4(*m_view);
 
                     [wg_x, wg_y, 1]
                 },
@@ -684,9 +683,9 @@ ethel::shader_glsl_compute! {
         workgroup [8, 8, 1];
 
         uniform {
-            length 1, proj_mat   : mat4 => [f32; 16];
-            length 1, view_mat   : mat4 => [f32; 16];
-            length 1, resolution : uvec2 => [u32; 2];
+            on 0 => proj_mat   : mat4  from [f32; 16];
+            on 1 => view_mat   : mat4  from [f32; 16];
+            on 2 => resolution : uvec2 from [u32;  2];
         };
         image {
             on ATTRIB_INTERP_IMAGE_BIND_RASTER => ima_raster : uimage2D as rg32ui   readonly;
