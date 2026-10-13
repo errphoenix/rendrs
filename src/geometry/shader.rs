@@ -1,4 +1,4 @@
-use ethel::shader::{GlslStorage, GlslStruct};
+use ethel::shader::{GlslLib, GlslStorage, GlslStruct};
 
 ethel::shader_glsl_struct! {
     struct DomainData {
@@ -85,12 +85,93 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
     }
 };
 
+pub const LIB_GBANK_INSTANCING_HEADER: GlslLib = GlslLib::new(
+    "
+    #define GBANK_INSTANCING_LISTS_CAP    1024\n
+    #define GBANK_INSTANCING_DATA_CAP    65535\n
+    #define GBANK_INSTANCING_LIST_STRIDE     4\n
+    #define GBANK_INSTANCING_DATA_STRIDE     8\n
+    #define GBANK_INSTANCING_DATA_OFFSET  4096\n
+    ",
+);
+
 pub const SSBO_GBANK_INSTANCING_DATA: GlslStorage = ethel::shader_glsl_ssbo! {
     buf Rendrs_GBANK_InstanceData => {
-        InstanceList      : rendrs_gbank_instance_lists[1024];
-        InstanceTransform : rendrs_gbank_instance_transforms[65535];
+        [dyn_array uint : gbank_instancing_words]
     }
 };
+
+/// Getters for instancing geometry-bank buffers.
+///
+/// Requires [`LIB_GBANK_INSTANCING_HEADER`], [`TYPE_INSTANCELIST`],
+/// [`TYPE_INSTANCE_TRANSFORM`] and [`SSBO_GBANK_INSTANCING_DATA`]
+pub const LIB_GBANK_INSTANCING_GETTERS: GlslLib = GlslLib::new(
+    "
+    InstanceList GetInstanceList(uint index) {
+        const uint location = index * GBANK_INSTANCING_LIST_STRIDE;
+        const uint w0 = gbank_instancing_words[location];
+        const uint w1 = gbank_instancing_words[location + 1];
+        const uint w2 = gbank_instancing_words[location + 2];
+        const uint w3 = gbank_instancing_words[location + 3];
+        return InstanceList(w0, w1, w2, w3);
+    }
+    InstanceTransform GetInstanceTransform(uint index) {
+        const uint location = index * GBANK_INSTANCING_DATA_STRIDE + GBANK_INSTANCING_DATA_OFFSET;
+        const uint w0 = gbank_instancing_words[location];
+        const uint w1 = gbank_instancing_words[location + 1];
+        const uint w2 = gbank_instancing_words[location + 2];
+        const uint w3 = gbank_instancing_words[location + 3];
+        const uint w4 = gbank_instancing_words[location + 4];
+        const uint w5 = gbank_instancing_words[location + 5];
+        const uint w6 = gbank_instancing_words[location + 6];
+        const uint w7 = gbank_instancing_words[location + 7];
+        const float f0 = uintBitsToFloat(w0);
+        const float f1 = uintBitsToFloat(w1);
+        const float f2 = uintBitsToFloat(w2);
+        const float f3 = uintBitsToFloat(w3);
+        const float f4 = uintBitsToFloat(w4);
+        const float f5 = uintBitsToFloat(w5);
+        const float f6 = uintBitsToFloat(w6);
+        const float f7 = uintBitsToFloat(w7);
+        return InstanceTransform(f0, f1, f2, f3, f4, f5, f6, f7);
+    }
+    ",
+);
+
+/// Internal setters for instancing geometry-bank buffers.
+///
+/// Requires [`LIB_GBANK_INSTANCING_HEADER`], [`TYPE_INSTANCELIST`],
+/// [`TYPE_INSTANCE_TRANSFORM`] and [`SSBO_GBANK_INSTANCING_DATA`]
+pub const LIB_GBANK_INSTANCING_SETTERS: GlslLib = GlslLib::new(
+    "
+    void i_SetInstanceList(uint index, InstanceList value) {
+        const uint location = index * GBANK_INSTANCING_LIST_STRIDE;
+        gbank_instancing_words[location] = value.geometry_id;
+        gbank_instancing_words[location + 1] = value.tri_base;
+        gbank_instancing_words[location + 2] = value.tri_count;
+        gbank_instancing_words[location + 3] = value.instance_base_count;
+    }
+    void i_SetInstanceTransform(uint index, InstanceTransform value) {
+        const uint location = index * GBANK_INSTANCING_DATA_STRIDE + GBANK_INSTANCING_DATA_OFFSET;
+        const uint w0 = floatBitsToUint(value.px);
+        const uint w1 = floatBitsToUint(value.py);
+        const uint w2 = floatBitsToUint(value.pz);
+        const uint w3 = floatBitsToUint(value.qx);
+        const uint w4 = floatBitsToUint(value.qy);
+        const uint w5 = floatBitsToUint(value.qz);
+        const uint w6 = floatBitsToUint(value.qw);
+        const uint w7 = floatBitsToUint(value.s);
+        gbank_instancing_words[location]     = w0;
+        gbank_instancing_words[location + 1] = w1;
+        gbank_instancing_words[location + 2] = w2;
+        gbank_instancing_words[location + 3] = w3;
+        gbank_instancing_words[location + 4] = w4;
+        gbank_instancing_words[location + 5] = w5;
+        gbank_instancing_words[location + 6] = w6;
+        gbank_instancing_words[location + 7] = w7;
+    }
+    ",
+);
 
 /// Create a geometry submission job to be attached to a geometry pass.
 ///
@@ -342,8 +423,8 @@ macro_rules! geometry_submission_job {
             [< $name:upper GEOM_IMAGE_COUNT >],
         >;
 
-        const SSBO_GBANK_VERTEX: ethel::shader::GlslStorage = $vb_source::SSBO_ARRAYS;
-        const SSBO_GBANK_TRIANGLE: ethel::shader::GlslStorage = $tb_source::SSBO_ARRAYS;
+        const SSBO_GBANK_VERTEX: ethel::shader::GlslStorage = $vb_source::SSBO_BANK;
+        const SSBO_GBANK_TRIANGLE: ethel::shader::GlslStorage = $tb_source::SSBO_BANK;
 
         ethel::shader_glsl_compute! {
             struct [< $name GeomSubmit >] > [460] {
@@ -381,6 +462,14 @@ macro_rules! geometry_submission_job {
                     $crate::pack::PACK_OCTAHEDRON_DECODE;
                     $crate::pack::PACK_SPHERICAL_ENCODE;
                     $crate::pack::PACK_SPHERICAL_DECODE;
+
+                    LIB_GBANK_BUFFERS_HEADER;
+                    LIB_GBANK_BUFFERS_GETTERS;
+                    LIB_GBANK_BUFFERS_SETTERS;
+
+                    $crate::geometry::shader::LIB_GBANK_INSTANCING_HEADER;
+                    $crate::geometry::shader::LIB_GBANK_INSTANCING_GETTERS;
+                    $crate::geometry::shader::LIB_GBANK_INSTANCING_SETTERS;
 
                     // domain data bit-packing helpers (internal)
                     ethel::shader::GlslLib::new(indoc::indoc! {
@@ -420,22 +509,16 @@ macro_rules! geometry_submission_job {
                     ethel::shader::GlslLib::new(indoc::indoc! {
                         "
                         void VertexDataPosition(uint index, vec3 position) {
-                            rendrs_gbank_vertex_positions[index] = float[](
-                                position.x, position.y, position.z
-                            );
+                            i_SetVertexPosition(index, position);
                         }
                         void VertexDataNormal(uint index, vec2 normal_oct) {
-                            rendrs_gbank_vertex_normals[index] = float[](
-                                normal_oct.x, normal_oct.y
-                            );
+                            i_SetVertexNormal(index, normal_oct);
                         }
                         void VertexDataNormal(uint index, vec3 normal) {
                             VertexDataNormal(index, rendrs_packOctahedron(normal));
                         }
                         void VertexDataUv(uint index, vec2 uv) {
-                            rendrs_gbank_vertex_uvs[index] = float[](
-                                uv.x, uv.y
-                            );
+                            i_SetVertexUv(index, uv);
                         }
                         void VertexData(uint index, vec3 p, vec2 n_oct, vec2 uv) {
                             VertexDataPosition(index, p);
@@ -448,15 +531,15 @@ macro_rules! geometry_submission_job {
                             VertexDataUv(index, uv);
                         }
                         void TriangleDataIndices(uint index, uint data[3]) {
-                            rendrs_gbank_triangle_indices[index] = data;
+                            i_SetTriangleIndices(index, data);
                         }
                         void TriangleDataAttribs(uint index, uint geom_id, uint mat_id, uint extra) {
                             TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id | (extra << 16));
-                            rendrs_gbank_triangle_attribs[index] = attribs;
+                            i_SetTriangleAttribs(index, attribs);
                         }
                         void TriangleDataAttribs(uint index, uint geom_id, uint mat_id) {
                             TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id);
-                            rendrs_gbank_triangle_attribs[index] = attribs;
+                            i_SetTriangleAttribs(index, attribs);
                         }
                         void TriangleData(uint index, uint data[3], uint geom_id, uint mat_id, uint extra) {
                             TriangleDataIndices(index, data);
@@ -465,36 +548,6 @@ macro_rules! geometry_submission_job {
                         void TriangleData(uint index, uint data[3], uint geom_id, uint mat_id) {
                             TriangleDataIndices(index, data);
                             TriangleDataAttribs(index, geom_id, mat_id);
-                        }
-                        "
-                    });
-                    // vertex/triangle getters
-                    ethel::shader::GlslLib::new(indoc::indoc! {
-                        "
-                        uint[3] GetTriangleIndices(uint index) {
-                            return rendrs_gbank_triangle_indices[index];
-                        }
-                        TriangleAttribs GetTriangleAttribs(uint index) {
-                            return rendrs_gbank_triangle_attribs[index];
-                        }
-                        uint GetTriangleAttribMaterialID(uint index) {
-                            return GetTriangleAttribs(index).extra_material_id & 0xffffu;
-                        }
-                        uint GetTriangleAttribExtra(uint index) {
-                            return GetTriangleAttribs(index).extra_material_id >> 16;
-                        }
-
-                        vec3 GetVertexPosition(uint index) {
-                            float position[3] = rendrs_gbank_vertex_positions[index];
-                            return vec3(position[0], position[1], position[2]);
-                        }
-                        vec2 GetVertexNormal(uint index) {
-                            float normal[2] = rendrs_gbank_vertex_normals[index];
-                            return vec2(normal[0], normal[1]);
-                        }
-                        vec2 GetVertexUv(uint index) {
-                            float uv[2] = rendrs_gbank_vertex_uvs[index];
-                            return vec2(uv[0], uv[1]);
                         }
                         "
                     });
@@ -540,7 +593,7 @@ macro_rules! geometry_submission_job {
                         }
 
                         void InstanceDataTransform(uint index, vec3 position, vec4 quaternion, float scale) {
-                            rendrs_gbank_instance_transforms[index] = InstanceTransform(
+                            InstanceTransform transform = InstanceTransform(
                                 position.x, position.y, position.z,
 
                                 quaternion.x, quaternion.y,
@@ -548,6 +601,7 @@ macro_rules! geometry_submission_job {
 
                                 scale
                             );
+                            i_SetInstanceTransform(index, transform);
                         }
                         void InstanceDataTransform(uint index, vec3 position, vec4 quaternion) {
                             InstanceDataTransform(index, position, quaternion, 1.0);
@@ -556,20 +610,6 @@ macro_rules! geometry_submission_job {
                             InstanceDataTransform(index, position, vec4(vec3(0.0), 1.0), 1.0);
                         }
 
-                        void InstanceListDataGeometry(uint index, uint geo_id, uint tri_base, uint tri_count) {
-                            InstanceList list = rendrs_gbank_instance_lists[index];
-                            list.geometry_id = geo_id;
-                            list.tri_base = tri_base;
-                            list.tri_count = tri_count;
-                            rendrs_gbank_instance_lists[index] = list;
-                        }
-                        void InstanceListDataBounds(uint index, uint instance_base, uint instance_count) {
-                            InstanceList list = rendrs_gbank_instance_lists[index];
-                            uint m = instance_base << 16;
-                            uint l = instance_count & 0xffff;
-                            list.instance_base_count = l | m;
-                            rendrs_gbank_instance_lists[index] = list;
-                        }
                         void InstanceListData(
                             uint index, uint geo_id,
                             uint tri_base, uint tri_count,
@@ -577,9 +617,10 @@ macro_rules! geometry_submission_job {
                         ) {
                             uint im = instance_base << 16;
                             uint il = instance_count & 0xffff;
-                            rendrs_gbank_instance_lists[index] = InstanceList(
+                            InstanceList list = InstanceList(
                               geo_id, tri_base, tri_count, il | im
                             );
+                            i_SetInstanceList(index, list);
                         }
 
                         uint AllocInstanceListData(
@@ -589,20 +630,13 @@ macro_rules! geometry_submission_job {
                         ) {
                             uint index = AllocInstanceList();
                             uint im = instance_base << 16;
-                            uint il = instance_count & 0xffff;
-                            rendrs_gbank_instance_lists[index] = InstanceList(
+                            uint il = instance_count & 0xffffu;
+                            InstanceList list = InstanceList(
                               geo_id, tri_base, tri_count, il | im
                             );
+                            i_SetInstanceList(index, list);
                             return index;
                         }
-
-                        InstanceList GetInstanceList(uint index) {
-                            return rendrs_gbank_instance_lists[index];
-                        }
-                        InstanceTransform GetInstanceTransform(uint index) {
-                            return rendrs_gbank_instance_transforms[index];
-                        }
-
                         "
                     });
 

@@ -7,6 +7,7 @@ pub use rasterize::{
     geom_attribs_gradients_target, geom_rasterize_target,
 };
 pub use shader::{
+    LIB_GBANK_INSTANCING_GETTERS, LIB_GBANK_INSTANCING_HEADER, LIB_GBANK_INSTANCING_SETTERS,
     SSBO_BINDING_DOMAINS, SSBO_BINDING_GBANK_GCOUNTER, SSBO_BINDING_GBANK_INSTANCE_DATA,
     SSBO_BINDING_GBANK_TRIANGLE, SSBO_BINDING_GBANK_VERTEX, SSBO_DOMAINS, SSBO_GBANK_GCOUNTER,
     SSBO_GBANK_INSTANCING_DATA, TYPE_DOMAIN_DATA, TYPE_INSTANCE_TRANSFORM, TYPE_INSTANCELIST,
@@ -87,38 +88,124 @@ macro_rules! geometry_buffers_impls {
         $valloc:expr;
         $talloc:expr;
     ) => {
+        pub const LIB_GBANK_BUFFERS_HEADER: ethel::shader::GlslLib =
+            ethel::shader::GlslLib::new(concat!(
+                "#define GBANK_BUFFERS_VERTEX_POS_STRIDE  3\n",
+                "#define GBANK_BUFFERS_VERTEX_UV_STRIDE   2\n",
+                "#define GBANK_BUFFERS_VERTEX_NORM_STRIDE 2\n",
+                "#define GBANK_BUFFERS_VERTEX_UV_OFFSET   3 * ", $valloc, "\n",
+                "#define GBANK_BUFFERS_VERTEX_NORM_OFFSET 5 * ", $valloc, "\n",
+                "#define GBANK_BUFFERS_TRIANGLE_INDICES_STRIDE 3\n",
+                "#define GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE 2\n",
+                "#define GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET 3 * ", $talloc, "\n"
+            ));
+
+        /// Getters for main geometry data in geometry-bank buffers.
+        ///
+        /// Requires [`LIB_GBANK_BUFFERS_HEADER`], [`TYPE_TRIANGLE_ATTRIBS`],
+        /// the respective vertex buffers and triangle buffers ssbo banks.
+        pub const LIB_GBANK_BUFFERS_GETTERS: ethel::shader::GlslLib =
+            ethel::shader::GlslLib::new("
+                vec3 GetVertexPosition(uint index) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_POS_STRIDE;
+                    const float w0 = gbank_vertex_words[location];
+                    const float w1 = gbank_vertex_words[location + 1];
+                    const float w2 = gbank_vertex_words[location + 2];
+                    return vec3(w0, w1, w2);
+                }
+                vec2 GetVertexNormal(uint index) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_NORM_STRIDE + GBANK_BUFFERS_VERTEX_NORM_OFFSET;
+                    const float w0 = gbank_vertex_words[location];
+                    const float w1 = gbank_vertex_words[location + 1];
+                    return vec2(w0, w1);
+                }
+                vec2 GetVertexUv(uint index) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_UV_STRIDE + GBANK_BUFFERS_VERTEX_UV_OFFSET;
+                    const float w0 = gbank_vertex_words[location];
+                    const float w1 = gbank_vertex_words[location + 1];
+                    return vec2(w0, w1);
+                }
+
+                uint[3] GetTriangleIndices(uint index) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_INDICES_STRIDE;
+                    const uint w0 = gbank_triangle_words[location];
+                    const uint w1 = gbank_triangle_words[location + 1];
+                    const uint w2 = gbank_triangle_words[location + 2];
+                    return uint[3](w0, w1, w2);
+                }
+                TriangleAttribs GetTriangleAttribs(uint index) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+                    const uint w0 = gbank_triangle_words[location];
+                    const uint w1 = gbank_triangle_words[location + 1];
+                    return TriangleAttribs(w0, w1);
+                }
+                uint GetTriangleAttribMaterialID(uint index) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+                    const uint w1 = gbank_triangle_words[location + 1];
+                    return w1 & 0xffffu;
+                }
+                uint GetTriangleAttribExtra(uint index) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+                    const uint w1 = gbank_triangle_words[location + 1];
+                    return w1 >> 16;
+                }
+            ");
+
+        /// Internal setters for main geometry data in geometry-bank buffers.
+        ///
+        /// Requires [`LIB_GBANK_BUFFERS_HEADER`], [`TYPE_TRIANGLE_ATTRIBS`],
+        /// the respective vertex buffers and triangle buffers ssbo banks.
+        pub const LIB_GBANK_BUFFERS_SETTERS: ethel::shader::GlslLib =
+            ethel::shader::GlslLib::new(
+                "void i_SetVertexPosition(uint index, vec3 position) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_POS_STRIDE;
+                    gbank_vertex_words[location]     = position.x;
+                    gbank_vertex_words[location + 1] = position.y;
+                    gbank_vertex_words[location + 2] = position.z;
+                }
+                void i_SetVertexNormal(uint index, vec2 normal) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_NORM_STRIDE + GBANK_BUFFERS_VERTEX_NORM_OFFSET;
+                    gbank_vertex_words[location]     = normal.x;
+                    gbank_vertex_words[location + 1] = normal.y;
+                }
+                void i_SetVertexUv(uint index, vec2 uv) {
+                    const uint location = index * GBANK_BUFFERS_VERTEX_UV_STRIDE + GBANK_BUFFERS_VERTEX_UV_OFFSET;
+                    gbank_vertex_words[location]     = uv.x;
+                    gbank_vertex_words[location + 1] = uv.y;
+                }
+
+                void i_SetTriangleIndices(uint index, uint[3] indices) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_INDICES_STRIDE;
+                    gbank_triangle_words[location]     = indices[0];
+                    gbank_triangle_words[location + 1] = indices[1];
+                    gbank_triangle_words[location + 2] = indices[2];
+                }
+                void i_SetTriangleAttribs(uint index, TriangleAttribs attribs) {
+                    const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+                    gbank_triangle_words[location]     = attribs.geometry_id;
+                    gbank_triangle_words[location + 1] = attribs.extra_material_id;
+                }
+            ");
+
         pub type VertexBuffers = $vb;
         pub type TriangleBuffers = $tb;
         impl VertexBuffers {
-            pub const SSBO_ARRAYS: ethel::shader::GlslStorage =
+            pub const SSBO_BANK: ethel::shader::GlslStorage =
                 ethel::shader::GlslStorage::new(concat!(
                     "layout(std430, binding = ",
                     0, // must match value defined in shader module
                     ") buffer Rendrs_GBANK_VertexBuffers\n{\n",
-                    "    float rendrs_gbank_vertex_positions[",
-                    $valloc,
-                    "][3];\n",
-                    "    float rendrs_gbank_vertex_normals[",
-                    $valloc,
-                    "][2];\n",
-                    "    float rendrs_gbank_vertex_uvs[",
-                    $valloc,
-                    "][2];\n",
+                    "    float gbank_vertex_words[];\n",
                     "};\n"
                 ));
         }
         impl TriangleBuffers {
-            pub const SSBO_ARRAYS: ethel::shader::GlslStorage =
+            pub const SSBO_BANK: ethel::shader::GlslStorage =
                 ethel::shader::GlslStorage::new(concat!(
                     "layout(std430, binding = ",
                     1, // must match value defined in shader module
                     ") buffer Rendrs_GBANK_TriangleBuffers\n{\n",
-                    "    uint rendrs_gbank_triangle_indices[",
-                    $talloc,
-                    "][3];\n",
-                    "    TriangleAttribs rendrs_gbank_triangle_attribs[",
-                    $talloc,
-                    "];\n",
+                    "    uint gbank_triangle_words[];\n",
                     "};\n"
                 ));
         }

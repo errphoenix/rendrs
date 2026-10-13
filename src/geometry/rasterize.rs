@@ -328,6 +328,8 @@ ethel::shader_glsl! {
                 GlslLib::new("");
                 >Instanced => LIB_QUATERNION_MUL;
                 >Instanced => LIB_QUATERNION_MUL_VEC;
+                >Instanced => super::LIB_GBANK_INSTANCING_HEADER;
+                >Instanced => super::LIB_GBANK_INSTANCING_GETTERS;
             };
 
             src() {
@@ -341,11 +343,11 @@ ethel::shader_glsl! {
                     Instanced => {
                         "
                         uint draw_id    = gl_DrawID - instance_command_offset;
-                        InstanceList il = rendrs_gbank_instance_lists[draw_id];
+                        InstanceList il = GetInstanceList(draw_id);
                         uint instance_base = il.instance_base_count >> 16;
                         uint instance_id   = gl_BaseInstance + gl_InstanceID;
 
-                        InstanceTransform transform = rendrs_gbank_instance_transforms[instance_id];
+                        InstanceTransform transform = GetInstanceTransform(instance_id);
                         float t_scaling  = transform.s;
                         vec4  t_rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
                         vec3  t_position = vec3(transform.px, transform.py, transform.pz);
@@ -451,6 +453,10 @@ ethel::shader_glsl_compute! {
             Batched;
             Instanced;
         };
+        lib {
+            super::LIB_GBANK_INSTANCING_HEADER;
+            super::LIB_GBANK_INSTANCING_GETTERS;
+        };
 
         src() {
             match {
@@ -461,7 +467,7 @@ ethel::shader_glsl_compute! {
 
                     //0 reserved to batch draw command
                     for (uint i = 0; i < gc_instancelist; ++i) {
-                        const InstanceList list   = rendrs_gbank_instance_lists[i];
+                        const InstanceList list   = GetInstanceList(i);
                         const uint instance_base  = list.instance_base_count >> 16;
                         const uint instance_count = list.instance_base_count & 0x0000ffff;
                         out_cmd[i + 1] = DrawElementsIndirectCommand(
@@ -735,6 +741,8 @@ ethel::shader_glsl_compute! {
             INTERNAL_UTIL_ATTR_INTERP_PROJECT_TO_SCREEN;
             LIB_QUATERNION_MUL;
             LIB_QUATERNION_MUL_VEC;
+            super::LIB_GBANK_INSTANCING_HEADER;
+            super::LIB_GBANK_INSTANCING_GETTERS;
         };
 
         src() {
@@ -777,7 +785,7 @@ ethel::shader_glsl_compute! {
 
             vec4 inst_Q;
             if (is_inst) {
-                InstanceTransform transform = rendrs_gbank_instance_transforms[inst_id];
+                InstanceTransform transform = GetInstanceTransform(inst_id);
                 float t_scaling  = transform.s;
                 vec4  t_rotation = vec4(transform.qx, transform.qy, transform.qz, transform.qw);
                 vec3  t_position = vec3(transform.px, transform.py, transform.pz);
