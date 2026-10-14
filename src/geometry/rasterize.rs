@@ -754,6 +754,12 @@ ethel::shader_glsl_compute! {
 
             // full 32 bits for triangle index
             uint Tid = raster_data.x;
+            if (Tid == 0) {
+                imageStore(ima_space, px, vec4(0.0));
+                imageStore(ima_grads, px, vec4(0.0));
+                return;
+            }
+            Tid -= 1; //0 is a valid index but rasterizer offsets valid tris to 1
 
             // 16 bits for optional instance id
             // 1  bit  for 'is instanced' flag
@@ -767,13 +773,6 @@ ethel::shader_glsl_compute! {
             const uint inst_id = G16bl >> 16;
 
             uint Mid = G16br & G_MASK_15B;
-
-            if (Tid == 0) {
-                imageStore(ima_space, px, vec4(0.0));
-                imageStore(ima_grads, px, vec4(0.0));
-                return;
-            }
-            Tid -= 1; //0 is a valid index but rasterizer offsets valid tris to 1
 
             uint b_tri[3] = rendrs_triangle_indices[Tid];
             float b_p0[3] = rendrs_vertex_positions[b_tri[0]];

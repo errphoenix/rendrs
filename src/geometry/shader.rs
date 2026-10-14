@@ -84,6 +84,16 @@ pub const SSBO_DOMAINS: GlslStorage = ethel::shader_glsl_ssbo! {
         [dyn_array DomainData : rendrs_domains]
     }
 };
+pub const SSBO_GBANK_VERTEX_BUFFER: GlslStorage = ethel::shader_glsl_ssbo! {
+    buf Rendrs_GBANK_VertexBuffers => {
+        [dyn_array float : gbank_vertex_words]
+    }
+};
+pub const SSBO_GBANK_TRIANGLE_BUFFER: GlslStorage = ethel::shader_glsl_ssbo! {
+    buf Rendrs_GBANK_TriangleBuffers => {
+        [dyn_array uint : gbank_triangle_words]
+    }
+};
 
 pub const LIB_GBANK_INSTANCING_HEADER: GlslLib = GlslLib::new(
     "
@@ -172,6 +182,93 @@ pub const LIB_GBANK_INSTANCING_SETTERS: GlslLib = GlslLib::new(
     }
     ",
 );
+
+/// Getters for main geometry data in geometry-bank buffers.
+///
+/// Requires [`LIB_GBANK_BUFFERS_HEADER`], [`TYPE_TRIANGLE_ATTRIBS`],
+/// the respective vertex buffers and triangle buffers ssbo banks.
+pub const LIB_GBANK_BUFFERS_GETTERS: ethel::shader::GlslLib =
+    ethel::shader::GlslLib::new("
+        vec3 GetVertexPosition(uint index) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_POS_STRIDE;
+            const float w0 = gbank_vertex_words[location];
+            const float w1 = gbank_vertex_words[location + 1];
+            const float w2 = gbank_vertex_words[location + 2];
+            return vec3(w0, w1, w2);
+        }
+        vec2 GetVertexNormal(uint index) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_NORM_STRIDE + GBANK_BUFFERS_VERTEX_NORM_OFFSET;
+            const float w0 = gbank_vertex_words[location];
+            const float w1 = gbank_vertex_words[location + 1];
+            return vec2(w0, w1);
+        }
+        vec2 GetVertexUv(uint index) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_UV_STRIDE + GBANK_BUFFERS_VERTEX_UV_OFFSET;
+            const float w0 = gbank_vertex_words[location];
+            const float w1 = gbank_vertex_words[location + 1];
+            return vec2(w0, w1);
+        }
+
+        uint[3] GetTriangleIndices(uint index) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_INDICES_STRIDE;
+            const uint w0 = gbank_triangle_words[location];
+            const uint w1 = gbank_triangle_words[location + 1];
+            const uint w2 = gbank_triangle_words[location + 2];
+            return uint[3](w0, w1, w2);
+        }
+        TriangleAttribs GetTriangleAttribs(uint index) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+            const uint w0 = gbank_triangle_words[location];
+            const uint w1 = gbank_triangle_words[location + 1];
+            return TriangleAttribs(w0, w1);
+        }
+        uint GetTriangleAttribMaterialID(uint index) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+            const uint w1 = gbank_triangle_words[location + 1];
+            return w1 & 0xffffu;
+        }
+        uint GetTriangleAttribExtra(uint index) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+            const uint w1 = gbank_triangle_words[location + 1];
+            return w1 >> 16;
+        }
+    ");
+
+/// Internal setters for main geometry data in geometry-bank buffers.
+///
+/// Requires [`LIB_GBANK_BUFFERS_HEADER`], [`TYPE_TRIANGLE_ATTRIBS`],
+/// the respective vertex buffers and triangle buffers ssbo banks.
+pub const LIB_GBANK_BUFFERS_SETTERS: ethel::shader::GlslLib =
+    ethel::shader::GlslLib::new(
+        "void i_SetVertexPosition(uint index, vec3 position) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_POS_STRIDE;
+            gbank_vertex_words[location]     = position.x;
+            gbank_vertex_words[location + 1] = position.y;
+            gbank_vertex_words[location + 2] = position.z;
+        }
+        void i_SetVertexNormal(uint index, vec2 normal) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_NORM_STRIDE + GBANK_BUFFERS_VERTEX_NORM_OFFSET;
+            gbank_vertex_words[location]     = normal.x;
+            gbank_vertex_words[location + 1] = normal.y;
+        }
+        void i_SetVertexUv(uint index, vec2 uv) {
+            const uint location = index * GBANK_BUFFERS_VERTEX_UV_STRIDE + GBANK_BUFFERS_VERTEX_UV_OFFSET;
+            gbank_vertex_words[location]     = uv.x;
+            gbank_vertex_words[location + 1] = uv.y;
+        }
+
+        void i_SetTriangleIndices(uint index, uint[3] indices) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_INDICES_STRIDE;
+            gbank_triangle_words[location]     = indices[0];
+            gbank_triangle_words[location + 1] = indices[1];
+            gbank_triangle_words[location + 2] = indices[2];
+        }
+        void i_SetTriangleAttribs(uint index, TriangleAttribs attribs) {
+            const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
+            gbank_triangle_words[location]     = attribs.geometry_id;
+            gbank_triangle_words[location + 1] = attribs.extra_material_id;
+        }
+    ");
 
 /// Create a geometry submission job to be attached to a geometry pass.
 ///
@@ -423,9 +520,6 @@ macro_rules! geometry_submission_job {
             [< $name:upper GEOM_IMAGE_COUNT >],
         >;
 
-        const SSBO_GBANK_VERTEX: ethel::shader::GlslStorage = $vb_source::SSBO_BANK;
-        const SSBO_GBANK_TRIANGLE: ethel::shader::GlslStorage = $tb_source::SSBO_BANK;
-
         ethel::shader_glsl_compute! {
             struct [< $name GeomSubmit >] > [460] {
                 workgroup [64, 1, 1];
@@ -448,11 +542,11 @@ macro_rules! geometry_submission_job {
                     $($($type_glsl)+)?
                 };
                 ssbo {
-                    SSBO_GBANK_VERTEX
-                    SSBO_GBANK_TRIANGLE
-                    $crate::geometry::shader::SSBO_GBANK_GCOUNTER
-                    $crate::geometry::shader::SSBO_GBANK_INSTANCING_DATA
                     $crate::geometry::shader::SSBO_DOMAINS
+                    $crate::geometry::shader::SSBO_GBANK_VERTEX_BUFFER
+                    $crate::geometry::shader::SSBO_GBANK_TRIANGLE_BUFFER
+                    $crate::geometry::shader::SSBO_GBANK_INSTANCING_DATA
+                    $crate::geometry::shader::SSBO_GBANK_GCOUNTER
 
                     $($($ssbo_glsl)+)?
                 };
@@ -464,8 +558,8 @@ macro_rules! geometry_submission_job {
                     $crate::pack::PACK_SPHERICAL_DECODE;
 
                     LIB_GBANK_BUFFERS_HEADER;
-                    LIB_GBANK_BUFFERS_GETTERS;
-                    LIB_GBANK_BUFFERS_SETTERS;
+                    $crate::geometry::shader::LIB_GBANK_BUFFERS_GETTERS;
+                    $crate::geometry::shader::LIB_GBANK_BUFFERS_SETTERS;
 
                     $crate::geometry::shader::LIB_GBANK_INSTANCING_HEADER;
                     $crate::geometry::shader::LIB_GBANK_INSTANCING_GETTERS;
