@@ -296,10 +296,10 @@ impl MaterialGroupDescriptor {
                             texture_registry,
                             size as u32,
                             [
-                                &fallback_sc_white,
-                                &fallback_sc_black,
-                                &fallback_sc_white,
-                                &fallback_sc_black,
+                                &fallback_sc_white, // assume clear non-occluded surface
+                                &fallback_sc_black, // assume perfectly smooth surface
+                                &fallback_sc_black, // assume non-metallic
+                                &fallback_sc_black, // assume no displacement
                             ],
                             &mut image_load_buffer,
                         );
