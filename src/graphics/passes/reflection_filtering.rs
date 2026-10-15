@@ -199,7 +199,7 @@ pub const fn rf_prefilter_cubemap(
         [Sampler::wrap(sampler, SAMPLER_UNIT_INPUT_CUBEMAP)],
         outputs,
         |_, ctx| {
-            let wg_size = ctx.total_pixels.div_ceil(WORKSPACE_SIZE_XY);
+            let wg_size = ctx.total_pixels.div_ceil(64);
             [wg_size, 6, 1]
         },
     )
@@ -288,8 +288,8 @@ ethel::shader_glsl_compute! {
             id.x -= id.y * res;
 
             vec2 uv = vec2(
-                (float(id.x) / float(res)) * 2.0 - 1.0,
-                (float(id.y) / float(res)) * 2.0 - 1.0
+                (float(id.x) + 0.5) * (2.0 / float(res)) - 1.0,
+                (float(id.y) + 0.5) * (2.0 / float(res)) - 1.0
             );
             vec3 dir = rendrs_CubemapUV(uv, id.z);
             vec3 frameZ = normalize(dir);
@@ -379,8 +379,8 @@ ethel::shader_glsl_compute! {
                             sample_weight *= frameweight;
 
                             // compensate for jacobian
-                            sample_dir /= max(abs(sample_dir.x), max(sample_dir.y, sample_dir.z));
-                            sample_level += 0.75 * log(dot(sample_dir,sample_dir));
+                            sample_dir /= max(abs(sample_dir.x), max(abs(sample_dir.y), abs(sample_dir.z)));
+                            sample_level += 0.75 * log2(dot(sample_dir,sample_dir));
 
                             color.rgb += textureLod(input_cubemap, sample_dir, sample_level).rgb * sample_weight;
                             color.a   += sample_weight;

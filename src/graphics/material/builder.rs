@@ -14,13 +14,13 @@ use crate::graphics::material::{
 /// Page indexing offset to ignore reserved first-N pages in material groups.
 ///
 /// The 3 reserved faces are, in order:
-/// * Fallback for `diffuse + alpha`, full blank rgba.
-/// * Fallback for ORMD, a full black rgba image.
-/// * Fallback for `normal + emissive`, full blue rgb + `0` alpha.
+/// * Fallback for `diffuse + alpha`, full blank rgba
+/// * Fallback for `normal + emissive`, full blue rgb with blank alpha channel
+/// * Fallback for `ORMD`, same for `normal + emissive`
 pub const PAGE_OFFSET_RESERVED: usize = 3;
 pub const PAGE_FALLBACK_DIFFUSE_ALPHA: usize = 0;
-pub const PAGE_FALLBACK_ORMD: usize = 1;
-pub const PAGE_FALLBACK_NORMAL_EMISSIVE: usize = 2;
+pub const PAGE_FALLBACK_NORMAL_EMISSIVE: usize = 1;
+pub const PAGE_FALLBACK_ORMD: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub struct MaterialGroupDescriptor {
@@ -196,22 +196,37 @@ impl MaterialGroupDescriptor {
                 size,
                 size,
                 self.pages as i32,
-                MipLevels::default(),
+                MipLevels::try_new(8).unwrap(),
                 super::MATERIAL_TEXTURE_PIXEL_TYPE,
                 super::MATERIAL_TEXTURE_FORMAT,
             );
-            texture.set_filtering_minmag(TextureFiltering::Nearest);
+            texture.set_filtering_minmag(TextureFiltering::LinearMipmap(true));
+            //texture.set_filtering_anisotropic(true);
             texture.set_wrapping_st(TextureWrapping::Repeat);
             texture
         };
 
-        // load default blank texture at page 0
+        // load fallbacks
         #[cfg(not(test))]
         {
             let size = self.size as u32;
-            let blank_image = image::RgbaImage::from_pixel(size, size, image::Rgba([255u8; 4]));
+            let blank = image::RgbaImage::from_pixel(size, size, image::Rgba([255u8; 4]));
+            let signed_z =
+                image::RgbaImage::from_pixel(size, size, image::Rgba([128u8, 128u8, 255u8, 0u8]));
+            let purple =
+                image::RgbaImage::from_pixel(size, size, image::Rgba([255u8, 0u8, 255u8, 0u8]));
+
+            // blank texture (all white albedo, opaque) at page 0
             texture
-                .upload_layer_whole(0, 0, blank_image.as_bytes())
+                .upload_layer_whole(0, 0, blank.as_bytes())
+                .expect("texture is always array texture");
+            // signed-z texture (z-normal map, no emit) at page 1
+            texture
+                .upload_layer_whole(0, 1, signed_z.as_bytes())
+                .expect("texture is always array texture");
+            // purple texture (clear occlusion, full metallic) at page 2
+            texture
+                .upload_layer_whole(0, 2, purple.as_bytes())
                 .expect("texture is always array texture");
         }
 
@@ -269,11 +284,7 @@ impl MaterialGroupDescriptor {
                     metallic,
                     displacement,
                 }) => {
-                    if occlusion.is_some()
-                        || roughness.is_some()
-                        || metallic.is_some()
-                        || displacement.is_some()
-                    {
+                    if roughness.is_some() || metallic.is_some() || displacement.is_some() {
                         build_4a(
                             #[cfg(not(test))]
                             &texture,
@@ -286,8 +297,8 @@ impl MaterialGroupDescriptor {
                             size as u32,
                             [
                                 &fallback_sc_white,
-                                &fallback_sc_white,
                                 &fallback_sc_black,
+                                &fallback_sc_white,
                                 &fallback_sc_black,
                             ],
                             &mut image_load_buffer,
