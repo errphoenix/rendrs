@@ -210,32 +210,30 @@ const GCOUNTER_COUNT: usize = 4;
 /// Index 3 = instances counter
 pub type GCounterBuffer = SingleBuffer<[u32; GCOUNTER_COUNT]>;
 
-/// Atomic counters buffer.
-///
-/// Index 0 = vertex counter
-///
-/// Index 1 = triangle counter
-///
-/// Index 2 = instance lists counter
-///
-/// Index 3 = instances counter
+/// Atomic counters buffer of geometry lists.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GeoCounters(u32, u32, u32, u32);
+pub struct GeoCounters {
+    pub vertices: u32,
+    pub triangles: u32,
+    pub instance_lists: u32,
+    pub instances: u32,
+}
 impl GeoCounters {
     pub const fn vertices(self) -> u32 {
-        self.0
+        self.vertices
     }
 
     pub const fn triangles(self) -> u32 {
-        self.1
+        self.triangles
     }
 
     pub const fn instance_lists(self) -> u32 {
-        self.2
+        self.instance_lists
     }
 
     pub const fn instances(self) -> u32 {
-        self.3
+        self.instances
     }
 }
 

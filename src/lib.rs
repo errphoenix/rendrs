@@ -11,6 +11,8 @@ pub mod pack;
 #[cfg(feature = "pipeline")]
 pub mod pipeline;
 
+pub mod prelude;
+
 #[cfg(feature = "batching")]
 pub const BATCH_UNITS: usize = batch::PER_BATCH_UNITS;
 

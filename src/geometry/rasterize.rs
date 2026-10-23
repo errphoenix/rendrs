@@ -480,10 +480,9 @@ ethel::shader_glsl_compute! {
                     }
 
                     // set rest to 0
-                    #define INSTANCELIST_CAP 1024
-                    const uint rest = INSTANCELIST_CAP - gc_instancelist;
+                    const uint rest = GBANK_INSTANCING_LISTS_CAP - gc_instancelist;
                     if (rest > 0) {
-                        for (uint i = gc_instancelist; i < INSTANCELIST_CAP; ++i) {
+                        for (uint i = gc_instancelist; i < GBANK_INSTANCING_LISTS_CAP; ++i) {
                             out_cmd[i + 1].instance_count = 0;
                         }
                     }
