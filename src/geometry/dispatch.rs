@@ -1,3 +1,5 @@
+use std::cell::{RefCell, RefMut};
+
 use ethel::{
     render::buffer::{SingleBuffer, StorageSection},
     shader::{ComputeShader, ShaderProgram},
@@ -11,24 +13,26 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DomainDataWriter<'buf> {
+    local_buffer: RefMut<'buf, Vec<DomainData>>,
     dst_buf: &'buf SingleBuffer<DomainData>,
+    // in number of elements
     write_len: usize,
 }
 impl<'buf> DomainDataWriter<'buf> {
-    pub const unsafe fn new(ssbo: &'buf SingleBuffer<DomainData>) -> Self {
+    pub unsafe fn new(
+        ssbo: &'buf SingleBuffer<DomainData>,
+        local_buffer: &'buf RefCell<Vec<DomainData>>,
+    ) -> Self {
         Self {
+            local_buffer: local_buffer.borrow_mut(),
             dst_buf: ssbo,
             write_len: 0,
         }
     }
 
     pub fn blit(&mut self, data: &[DomainData]) {
-        let offset = self.write_len;
         let len = data.len();
-        unsafe {
-            let ptr = self.dst_buf.raw().add(offset);
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, len);
-        }
+        self.local_buffer.extend_from_slice(data);
         self.write_len = len;
     }
 
@@ -37,13 +41,14 @@ impl<'buf> DomainDataWriter<'buf> {
         if index as u32 >= super::MAX_DOMAIN_COUNT {
             return false;
         }
-
-        unsafe {
-            let ptr = self.dst_buf.raw().add(index);
-            std::ptr::copy_nonoverlapping(&data, ptr, 1);
-        }
+        self.local_buffer.push(data);
         self.write_len += 1;
         true
+    }
+
+    pub fn upload(&mut self) {
+        self.dst_buf.write(&self.local_buffer, 0);
+        self.local_buffer.clear();
     }
 
     pub const fn len(&self) -> usize {
@@ -63,6 +68,7 @@ pub struct GeomPass<CS: ComputeShader, K: CtxType, const S: usize, const I: usiz
     shader: CS,
     inner_pass: ComputePass<K, S, I>,
     domain_data: SingleBuffer<DomainData>,
+    local_domain_buffer: RefCell<Vec<DomainData>>,
     pre_dispatch: GeomDispatchFn<CS, K>,
 }
 impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
@@ -87,8 +93,8 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         self.bind_shader();
         self.bind_samplers();
         self.bind_images();
-
-        let mut writer = unsafe { DomainDataWriter::new(&self.domain_data) };
+        let mut writer =
+            unsafe { DomainDataWriter::new(&self.domain_data, &self.local_domain_buffer) };
         let shader = &self.shader;
         (self.pre_dispatch)(frame_index, shader, ctx, &mut writer);
         let domain_count = writer.len();
@@ -127,6 +133,7 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> GeomPass<CS,
                 images,
                 |_, _| [0, 0, 0], // ignored
             ),
+            local_domain_buffer: RefCell::new(Vec::new()),
             domain_data: SingleBuffer::zeroed(super::MAX_DOMAIN_COUNT as usize),
             pre_dispatch,
         }
