@@ -269,7 +269,7 @@ macro_rules! ssbo_binding {
         6
     };
     (rendrs_Geom_Rasterize_CpyOptsOut) => {
-        10
+        8
     };
 }
 
