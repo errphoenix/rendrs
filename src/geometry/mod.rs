@@ -3,8 +3,11 @@ use ethel::render::buffer::SingleBuffer;
 pub use dispatch::GeomPass;
 use janus::GpuResource;
 pub use rasterize::{
-    AttribInterpolationPass, GeomRasterizePass, geom_attribs_framespace_target,
-    geom_attribs_gradients_target, geom_rasterize_target,
+    AttribInterpolationPass, GeomRasterizePass, RASTER_ID_COMPONENT_G_INSTANCE_FLAG_MASK,
+    RASTER_ID_COMPONENT_G_INSTANCE_ID_BITS, RASTER_ID_COMPONENT_G_INSTANCE_ID_MASK,
+    RASTER_ID_COMPONENT_G_MATERIAL_ID_BITS, RASTER_ID_COMPONENT_G_MATERIAL_ID_MASK,
+    RASTER_ID_COMPONENT_G_REPR, geom_attribs_framespace_target, geom_attribs_gradients_target,
+    geom_rasterize_target,
 };
 pub use shader::{
     LIB_GBANK_BUFFERS_GETTERS, LIB_GBANK_BUFFERS_SETTERS, LIB_GBANK_INSTANCING_GETTERS,
@@ -30,7 +33,7 @@ pub const MAX_DOMAIN_COUNT: u32 = 131_070;
 pub const DOMAIN_SIZE: u32 = 64;
 
 pub const MAX_INSTANCELIST_COUNT: u32 = 1024;
-pub const MAX_INSTANCES_GLOBAL_COUNT: u32 = 65535;
+pub const MAX_INSTANCES_GLOBAL_COUNT: u32 = 2097152;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -61,8 +64,8 @@ impl DomainData {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TriangleAttribs {
     pub geometry_id: u32,
-    pub material_id: u16,
-    pub extra: u16,
+    /// material msb, extra lsb
+    pub material_extra: u32,
 }
 
 pub trait HasVertexBuffers: GpuResource + std::fmt::Debug + 'static {
@@ -245,8 +248,8 @@ pub struct InstanceList {
     pub tri_base: u32,
     pub tri_count: u32,
 
-    /// packed as uint on gpu
-    pub instance_base_count: (u16, u16),
+    pub instance_base: u32,
+    pub instance_count: u32,
 }
 
 // #[repr(C)]

@@ -688,12 +688,22 @@ pub const UTIL_DERIVE_COTANGENT_GRAD: GlslLib = ethel::shader_glsl_lib! {
         vec3 dp2perp = cross(dp2, n);
         vec3 dp1perp = cross(n, dp1);
         vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-        vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-        float im = inversesqrt(max(dot(T, T), dot(B, B)));
-        T *= im;
-        B *= im;
+
+        // vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+        // float im = inversesqrt(max(dot(T, T), dot(B, B)));
+        // T *= im;
+        // B *= im;
+
+        // T -= dot(T, n) * n;
+        // B -= dot(B, T) * T - dot(B, n) * n;
+
+        // vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+        // float im = inversesqrt(max(dot(T, T), dot(B, B)));
+        // T *= im;
+        // B *= im;
 
         T -= dot(T, n) * n;
+        vec3 B = normalize(cross(T, n));
         B -= dot(B, T) * T - dot(B, n) * n;
 
         return mat3(T, B, n);

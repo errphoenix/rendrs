@@ -22,6 +22,28 @@ use crate::{
     },
 };
 
+pub const RASTER_ID_COMPONENT_G_INSTANCE_ID_BITS: u32 = 21;
+pub const RASTER_ID_COMPONENT_G_MATERIAL_ID_BITS: u32 = 10;
+pub const RASTER_ID_COMPONENT_G_INSTANCE_ID_MASK: u32 = 0x001f_ffff; // 21 bits 0b0000_0000_0001_1111_1111_1111_1111_1111
+pub const RASTER_ID_COMPONENT_G_INSTANCE_FLAG_MASK: u32 = 0x0020_0000; //  1 bit  0b0000_0000_0010_0000_0000_0000_0000_0000
+pub const RASTER_ID_COMPONENT_G_MATERIAL_ID_MASK: u32 = 0xffc0_0000; // 10 bits 0b1111_1111_1100_0000_0000_0000_0000_0000
+
+// 21 bits for optional instance id
+// 1  bit  for 'is instanced' flag
+// 10 bits for material id
+pub const RASTER_ID_COMPONENT_G_REPR: GlslLib = GlslLib::new(
+    "
+    #define G_MASK_INSTANCE_ID    0x001fffffu
+    #define G_MASK_INSTANCE_FLAG  0x00200000u
+    #define G_MASK_MATERIAL_ID    0xffc00000u
+    #define G_BITS_INSTANCE_ID             21
+
+    uint RasterG_GetMaterialID(uint G) { return G >> (G_BITS_INSTANCE_ID + 1); }
+    bool RasterG_GetInstanceFlag(uint G) { return (G & G_MASK_INSTANCE_FLAG) != 0; }
+    uint RasterG_GetInstanceID(uint G) { return G & G_MASK_INSTANCE_ID; }
+    ",
+);
+
 /// Returns an `RG32UI` [`RenderTarget`] for the geometry rasterization pass
 /// color output.
 pub fn geom_rasterize_target(
@@ -344,7 +366,7 @@ ethel::shader_glsl! {
                         "
                         uint draw_id    = gl_DrawID - instance_command_offset;
                         InstanceList il = GetInstanceList(draw_id);
-                        uint instance_base = il.instance_base_count >> 16;
+                        uint instance_base = il.instance_base;
                         uint instance_id   = gl_BaseInstance + gl_InstanceID;
 
                         InstanceTransform transform = GetInstanceTransform(instance_id);
@@ -389,6 +411,9 @@ ethel::shader_glsl! {
                     }
                 }
             };
+            lib {
+                RASTER_ID_COMPONENT_G_REPR;
+            };
 
             src() {
                 "
@@ -399,19 +424,18 @@ ethel::shader_glsl! {
                 // full 32 bits for triangle index
                 uint R = triangleID + 1;
 
-                // 16 bits for optional instance id
+                // 21 bits for optional instance id
                 // 1  bit  for 'is instanced' flag
-                // 15 bits for material id
+                // 10 bits for material id
 
-                #define G_MASK_15B 0x7fffu
-
-                const uint material_id = tri_attribs.extra_material_id & 0xffffu;
+                // bits of material_id, MSBs
+                const uint bits_material_id = tri_attribs.extra_material_id & G_MASK_MATERIAL_ID;
 
                 ";
                 match {
                     Instanced => "
-                        const uint is_instanced = 1 << 15;
-                        const uint instance_id  = instanceId << 16;
+                        const uint is_instanced = 1 << G_BITS_INSTANCE_ID;
+                        const uint instance_id  = instanceId & G_MASK_INSTANCE_ID;
                     ";
                     Batched => "
                         const uint is_instanced = 0;
@@ -420,7 +444,7 @@ ethel::shader_glsl! {
                 }
                 "
 
-                uint G = instance_id | is_instanced | (material_id & G_MASK_15B);
+                uint G = instance_id | is_instanced | bits_material_id;
 
                 outColor = uvec2(R, G);
                 ";
@@ -468,8 +492,8 @@ ethel::shader_glsl_compute! {
                     //0 reserved to batch draw command
                     for (uint i = 0; i < gc_instancelist; ++i) {
                         const InstanceList list   = GetInstanceList(i);
-                        const uint instance_base  = list.instance_base_count >> 16;
-                        const uint instance_count = list.instance_base_count & 0x0000ffff;
+                        const uint instance_base  = list.instance_base;
+                        const uint instance_count = list.instance_count;
                         out_cmd[i + 1] = DrawElementsIndirectCommand(
                             list.tri_count * 3,
                             instance_count,
@@ -732,6 +756,7 @@ ethel::shader_glsl_compute! {
             }
             super::SSBO_GBANK_INSTANCING_DATA
         };
+
         lib {
             PACK_OCTAHEDRON_WRAP_UTIL;
             PACK_OCTAHEDRON_ENCODE;
@@ -742,6 +767,7 @@ ethel::shader_glsl_compute! {
             LIB_QUATERNION_MUL_VEC;
             super::LIB_GBANK_INSTANCING_HEADER;
             super::LIB_GBANK_INSTANCING_GETTERS;
+            RASTER_ID_COMPONENT_G_REPR;
         };
 
         src() {
@@ -760,18 +786,15 @@ ethel::shader_glsl_compute! {
             }
             Tid -= 1; //0 is a valid index but rasterizer offsets valid tris to 1
 
-            // 16 bits for optional instance id
+            // 21 bits for optional instance id
             // 1  bit  for 'is instanced' flag
-            // 15 bits for material id
-            #define G_MASK_15B 0x7fff
+            // 10 bits for material id
+            //
+            // see RASTER_ID_COMPONENT_G_REPR
             const uint G = raster_data.y;
-            const uint G16br = G & 0x0000ffffu;
-            const uint G16bl = G & 0xffff0000u;
-
-            const bool is_inst = bool(G16br >> 15);
-            const uint inst_id = G16bl >> 16;
-
-            uint Mid = G16br & G_MASK_15B;
+            const uint Mid = RasterG_GetMaterialID(G);
+            const bool is_inst = RasterG_GetInstanceFlag(G);
+            const uint inst_id = RasterG_GetInstanceID(G);
 
             uint b_tri[3] = rendrs_triangle_indices[Tid];
             float b_p0[3] = rendrs_vertex_positions[b_tri[0]];

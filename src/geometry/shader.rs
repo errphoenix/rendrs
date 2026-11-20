@@ -22,9 +22,8 @@ ethel::shader_glsl_struct! {
         tri_base  : u32 => uint
         tri_count : u32 => uint
 
-        // 0xffff0000 - instance base
-        // 0x0000ffff - instance count
-        instance_base_count : u32 => uint
+        instance_base: u32 => uint
+        instance_count: u32 => uint
     }
 }
 ethel::shader_glsl_struct! {
@@ -97,11 +96,11 @@ pub const SSBO_GBANK_TRIANGLE_BUFFER: GlslStorage = ethel::shader_glsl_ssbo! {
 
 pub const LIB_GBANK_INSTANCING_HEADER: GlslLib = GlslLib::new(
     "
-    #define GBANK_INSTANCING_LISTS_CAP    1024\n
-    #define GBANK_INSTANCING_DATA_CAP    65535\n
-    #define GBANK_INSTANCING_LIST_STRIDE     4\n
-    #define GBANK_INSTANCING_DATA_STRIDE     8\n
-    #define GBANK_INSTANCING_DATA_OFFSET  4096\n
+    #define GBANK_INSTANCING_LISTS_CAP      1024\n
+    #define GBANK_INSTANCING_DATA_CAP    2097152\n
+    #define GBANK_INSTANCING_LIST_STRIDE       5\n
+    #define GBANK_INSTANCING_DATA_STRIDE       8\n
+    #define GBANK_INSTANCING_DATA_OFFSET    5120\n
     ",
 );
 
@@ -123,7 +122,8 @@ pub const LIB_GBANK_INSTANCING_GETTERS: GlslLib = GlslLib::new(
         const uint w1 = gbank_instancing_words[location + 1];
         const uint w2 = gbank_instancing_words[location + 2];
         const uint w3 = gbank_instancing_words[location + 3];
-        return InstanceList(w0, w1, w2, w3);
+        const uint w4 = gbank_instancing_words[location + 4];
+        return InstanceList(w0, w1, w2, w3, w4);
     }
     InstanceTransform GetInstanceTransform(uint index) {
         const uint location = index * GBANK_INSTANCING_DATA_STRIDE + GBANK_INSTANCING_DATA_OFFSET;
@@ -159,7 +159,8 @@ pub const LIB_GBANK_INSTANCING_SETTERS: GlslLib = GlslLib::new(
         gbank_instancing_words[location] = value.geometry_id;
         gbank_instancing_words[location + 1] = value.tri_base;
         gbank_instancing_words[location + 2] = value.tri_count;
-        gbank_instancing_words[location + 3] = value.instance_base_count;
+        gbank_instancing_words[location + 3] = value.instance_base;
+        gbank_instancing_words[location + 4] = value.instance_count;
     }
     void i_SetInstanceTransform(uint index, InstanceTransform value) {
         const uint location = index * GBANK_INSTANCING_DATA_STRIDE + GBANK_INSTANCING_DATA_OFFSET;
@@ -219,18 +220,18 @@ pub const LIB_GBANK_BUFFERS_GETTERS: ethel::shader::GlslLib =
         TriangleAttribs GetTriangleAttribs(uint index) {
             const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
             const uint w0 = gbank_triangle_words[location];
-            const uint w1 = gbank_triangle_words[location + 1];
+            const uint w1 = gbank_triangle_words[location + 1]; // extra and material
             return TriangleAttribs(w0, w1);
         }
         uint GetTriangleAttribMaterialID(uint index) {
             const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
             const uint w1 = gbank_triangle_words[location + 1];
-            return w1 & 0xffffu;
+            return w1 >> 22;
         }
         uint GetTriangleAttribExtra(uint index) {
             const uint location = index * GBANK_BUFFERS_TRIANGLE_ATTRIBS_STRIDE + GBANK_BUFFERS_TRIANGLE_ATTRIBS_OFFSET;
             const uint w1 = gbank_triangle_words[location + 1];
-            return w1 >> 16;
+            return w1 & 0x3fffff; // LS 22 bits
         }
     ");
 
@@ -628,11 +629,14 @@ macro_rules! geometry_submission_job {
                             i_SetTriangleIndices(index, data);
                         }
                         void TriangleDataAttribs(uint index, uint geom_id, uint mat_id, uint extra) {
-                            TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id | (extra << 16));
+                            const uint material_bits = mat_id << 22;
+                            const uint extra_bits = extra & 0x3fffff; // LS 22 bits
+                            const uint G_bits = material_bits | extra_bits;
+                            TriangleAttribs attribs = TriangleAttribs(geom_id, G_bits);
                             i_SetTriangleAttribs(index, attribs);
                         }
                         void TriangleDataAttribs(uint index, uint geom_id, uint mat_id) {
-                            TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id);
+                            TriangleAttribs attribs = TriangleAttribs(geom_id, mat_id << 22);
                             i_SetTriangleAttribs(index, attribs);
                         }
                         void TriangleData(uint index, uint data[3], uint geom_id, uint mat_id, uint extra) {
@@ -709,10 +713,9 @@ macro_rules! geometry_submission_job {
                             uint tri_base, uint tri_count,
                             uint instance_base, uint instance_count
                         ) {
-                            uint im = instance_base << 16;
-                            uint il = instance_count & 0xffff;
                             InstanceList list = InstanceList(
-                              geo_id, tri_base, tri_count, il | im
+                              geo_id, tri_base, tri_count,
+                              instance_base, instance_count
                             );
                             i_SetInstanceList(index, list);
                         }
@@ -723,10 +726,9 @@ macro_rules! geometry_submission_job {
                             uint instance_base, uint instance_count
                         ) {
                             uint index = AllocInstanceList();
-                            uint im = instance_base << 16;
-                            uint il = instance_count & 0xffffu;
                             InstanceList list = InstanceList(
-                              geo_id, tri_base, tri_count, il | im
+                              geo_id, tri_base, tri_count,
+                              instance_base, instance_count
                             );
                             i_SetInstanceList(index, list);
                             return index;
