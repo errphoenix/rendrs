@@ -6,6 +6,8 @@ use ethel::{
     },
     shader::{GlslLib, GlslStruct, ShaderKind},
 };
+#[cfg(feature = "pipeline-measure")]
+use janus::gl::TimeQuery;
 use janus::{
     GpuResource,
     texture::{ImageFormat, ImageType, MipLevels, TextureFiltering},
@@ -209,6 +211,21 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> GeomRasterizePass<V, T> {
                 }
             }),
         }
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn query(&self) -> Option<&TimeQuery> {
+        self.inner.query()
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn try_query_result(&self) -> Option<std::time::Duration> {
+        self.inner.try_query_result()
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn query_result_blocking(&self) -> Option<std::time::Duration> {
+        self.inner.query_result_blocking()
     }
 
     pub fn output(&self) -> &OutputObject {
@@ -644,6 +661,21 @@ impl<V: HasVertexBuffers, T: HasTriangleBuffers> AttribInterpolationPass<V, T> {
                 },
             ),
         }
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn query(&self) -> Option<&TimeQuery> {
+        self.inner.query()
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn try_query_result(&self) -> Option<std::time::Duration> {
+        self.inner.try_query_result()
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    pub fn query_result_blocking(&self) -> Option<std::time::Duration> {
+        self.inner.query_result_blocking()
     }
 
     pub const fn shader(&self) -> &ComputeShaderAttribsInterp {
