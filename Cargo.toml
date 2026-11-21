@@ -17,6 +17,7 @@ image = { version = "0.25.10", optional = true }
 [features]
 default = ["framebuffer", "batching", "pipeline", "graphics", "geometry"]
 pipeline = ["framebuffer", "dep:paste"]
+pipeline-measure = ["pipeline"]
 framebuffer = []
 glam = ["dep:glam"]
 pack = ["dep:indoc"]

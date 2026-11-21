@@ -2,6 +2,8 @@ use ethel::{
     render::{Resolution, buffer::StorageSection},
     shader::{ComputeShaderHandleView, ShaderHandleView, ShaderProgram},
 };
+#[cfg(feature = "pipeline-measure")]
+use janus::gl::{HasQuery, TimeQuery};
 use janus::{
     GlProperty, GpuResource,
     texture::{
@@ -768,6 +770,19 @@ macro_rules! context_wrapper {
 pub trait Pass<K: CtxType> {
     fn shader(&self) -> impl ShaderProgram;
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery>;
+
+    #[cfg(feature = "pipeline-measure")]
+    fn try_query_result(&self) -> Option<std::time::Duration> {
+        self.query().map(TimeQuery::try_poll_result).flatten()
+    }
+
+    #[cfg(feature = "pipeline-measure")]
+    fn query_result_blocking(&self) -> Option<std::time::Duration> {
+        self.query().map(TimeQuery::poll_result_blocking)
+    }
+
     fn bind_shader(&self) {
         self.shader().bind();
     }
@@ -784,6 +799,8 @@ pub struct DrawPass<K: CtxType, const S: usize, const O: usize> {
     outputs: [OutputObject; O],
     dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>),
     framebuffer: Option<Framebuffer>,
+    #[cfg(feature = "pipeline-measure")]
+    query: Option<TimeQuery>,
 }
 impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
     #[allow(refining_impl_trait)]
@@ -791,7 +808,17 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
         self.shader
     }
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery> {
+        self.query.as_ref()
+    }
+
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        #[cfg(feature = "pipeline-measure")]
+        if self.query.is_none() {
+            self.query = Some(TimeQuery::new());
+        }
+
         self.samplers
             .iter_mut()
             .for_each(|sampler| sampler.revalidate_if_pooled(render_pool));
@@ -805,10 +832,20 @@ impl<K: CtxType, const S: usize, const O: usize> Pass<K> for DrawPass<K, S, O> {
     }
 
     fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &K::Ctx<'_>) {
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::begin);
+        }
+
         self.bind_shader();
         self.bind_samplers();
         self.bind_framebuffer();
         (self.dispatch)(frame_index, ctx);
+
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::end);
+        }
     }
 }
 impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
@@ -831,6 +868,8 @@ impl<K: CtxType, const S: usize, const O: usize> DrawPass<K, S, O> {
             outputs,
             dispatch,
             framebuffer: None,
+            #[cfg(feature = "pipeline-measure")]
+            query: None,
         }
     }
 
@@ -936,6 +975,8 @@ pub struct ComputePass<K: CtxType, const S: usize, const I: usize> {
     samplers: [Sampler; S],
     images: [ImageObjectTarget; I],
     pre_dispatch: for<'ctx> fn(StorageSection, &K::Ctx<'ctx>) -> [u32; 3],
+    #[cfg(feature = "pipeline-measure")]
+    query: Option<TimeQuery>,
 }
 impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I> {
     #[allow(refining_impl_trait)]
@@ -943,7 +984,17 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
         self.shader
     }
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery> {
+        self.query.as_ref()
+    }
+
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        #[cfg(feature = "pipeline-measure")]
+        if self.query.is_none() {
+            self.query = Some(TimeQuery::new());
+        }
+
         self.samplers
             .iter_mut()
             .for_each(|sampler| sampler.revalidate_if_pooled(render_pool));
@@ -953,11 +1004,23 @@ impl<K: CtxType, const S: usize, const I: usize> Pass<K> for ComputePass<K, S, I
     }
 
     fn execute(&self, frame_index: StorageSection, _render_pool: &RenderPool, ctx: &K::Ctx<'_>) {
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::begin);
+        }
+
         self.bind_shader();
         self.bind_samplers();
         self.bind_images();
         let workgroups = (self.pre_dispatch)(frame_index, ctx);
-        self.shader.dispatch_compute(workgroups);
+        if workgroups.iter().all(|&i| i != 0) {
+            self.shader.dispatch_compute(workgroups);
+        }
+
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::end);
+        }
     }
 }
 impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
@@ -972,6 +1035,8 @@ impl<K: CtxType, const S: usize, const I: usize> ComputePass<K, S, I> {
             samplers,
             images,
             pre_dispatch,
+            #[cfg(feature = "pipeline-measure")]
+            query: None,
         }
     }
 
@@ -1025,11 +1090,21 @@ impl<const O: usize> Pass<EmptyPassCtx> for ClearPass<O> {
         ShaderHandleView::default()
     }
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery> {
+        self.0.query()
+    }
+
     fn revalidate(&mut self, render_pool: &RenderPool) {
         self.0.revalidate(render_pool);
     }
 
     fn execute(&self, _: StorageSection, _: &RenderPool, _ctx: &()) {
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::begin);
+        }
+
         if let Some(framebuffer) = self.0.framebuffer() {
             framebuffer.bind();
 
@@ -1041,6 +1116,11 @@ impl<const O: usize> Pass<EmptyPassCtx> for ClearPass<O> {
             unsafe {
                 janus::gl::Clear(clear_mask);
             }
+        }
+
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::end);
         }
     }
 }
@@ -1055,12 +1135,22 @@ impl Pass<EmptyPassCtx> for BlitPass {
         ShaderHandleView::default()
     }
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery> {
+        self.inner.query()
+    }
+
     fn revalidate(&mut self, render_pool: &RenderPool) {
         self.source.revalidate(render_pool);
         self.inner.revalidate(render_pool);
     }
 
     fn execute(&self, _: StorageSection, _: &RenderPool, _ctx: &()) {
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::begin);
+        }
+
         if let Some(framebuffer) = self.inner.framebuffer() {
             framebuffer.bind();
             framebuffer.set_read_buffer(Some(0));
@@ -1103,6 +1193,11 @@ impl Pass<EmptyPassCtx> for BlitPass {
                     );
                 }
             }
+        }
+
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::end);
         }
     }
 }

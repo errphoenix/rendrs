@@ -4,6 +4,8 @@ use ethel::{
     render::buffer::{SingleBuffer, StorageSection},
     shader::{ComputeShader, ShaderProgram},
 };
+#[cfg(feature = "pipeline-measure")]
+use janus::gl::{HasQuery, TimeQuery};
 
 use crate::{
     ComputePass,
@@ -70,6 +72,8 @@ pub struct GeomPass<CS: ComputeShader, K: CtxType, const S: usize, const I: usiz
     domain_data: SingleBuffer<DomainData>,
     local_domain_buffer: RefCell<Vec<DomainData>>,
     pre_dispatch: GeomDispatchFn<CS, K>,
+    #[cfg(feature = "pipeline-measure")]
+    query: Option<TimeQuery>,
 }
 impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
     for GeomPass<CS, K, S, I>
@@ -78,7 +82,17 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         self.shader.compute_handle().view()
     }
 
+    #[cfg(feature = "pipeline-measure")]
+    fn query(&self) -> Option<&TimeQuery> {
+        self.query.as_ref()
+    }
+
     fn revalidate(&mut self, render_pool: &RenderPool) {
+        #[cfg(feature = "pipeline-measure")]
+        if self.query.is_none() {
+            self.query = Some(TimeQuery::new());
+        }
+
         self.inner_pass.revalidate(render_pool);
     }
 
@@ -90,6 +104,11 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         _render_pool: &RenderPool,
         ctx: &<K as CtxType>::Ctx<'_>,
     ) {
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::begin);
+        }
+
         self.bind_shader();
         self.bind_samplers();
         self.bind_images();
@@ -99,6 +118,10 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         (self.pre_dispatch)(frame_index, shader, ctx, &mut writer);
         let domain_count = writer.len();
         if domain_count < 1 {
+            #[cfg(feature = "pipeline-measure")]
+            {
+                self.query().map(TimeQuery::end);
+            }
             return;
         }
         if domain_count as u32 >= super::MAX_DOMAIN_COUNT {
@@ -115,6 +138,11 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> Pass<K>
         self.shader
             .compute_handle()
             .dispatch_compute([domain_count as u32, 1, 1]);
+
+        #[cfg(feature = "pipeline-measure")]
+        {
+            self.query().map(TimeQuery::end);
+        }
     }
 }
 impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> GeomPass<CS, K, S, I> {
@@ -136,6 +164,8 @@ impl<CS: ComputeShader, K: CtxType, const S: usize, const I: usize> GeomPass<CS,
             local_domain_buffer: RefCell::new(Vec::new()),
             domain_data: SingleBuffer::zeroed(super::MAX_DOMAIN_COUNT as usize),
             pre_dispatch,
+            #[cfg(feature = "pipeline-measure")]
+            query: None,
         }
     }
 
